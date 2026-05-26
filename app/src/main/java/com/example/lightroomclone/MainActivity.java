@@ -25,6 +25,7 @@ import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -83,6 +84,7 @@ public final class MainActivity extends Activity {
     private final GeometryAdjustments geometry = new GeometryAdjustments();
     private final ColorAdjustments adjustments = new ColorAdjustments();
     private final Deque<EditSnapshot> undoStack = new ArrayDeque<>();
+    private final Deque<EditSnapshot> redoStack = new ArrayDeque<>();
     private CurveSet curves = new CurveSet();
     private final List<SliderBinding> sliderBindings = new ArrayList<>();
 
@@ -106,6 +108,16 @@ public final class MainActivity extends Activity {
     private boolean renderQueued;
     private boolean queuedInteractive;
     private boolean compareActive;
+    private boolean previewCompareArmed;
+    private Preset activeFilterPreset;
+    private ColorAdjustments filterBaseAdjustments;
+    private CurveSet filterBaseCurves;
+    private float filterStrength = 1f;
+    private final Runnable previewCompareRunnable = () -> {
+        previewCompareArmed = false;
+        compareActive = true;
+        renderComparePreview();
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -183,6 +195,7 @@ public final class MainActivity extends Activity {
         imageFrame.setBackgroundColor(Color.rgb(6, 7, 10));
         imageView = new GpuImageView(this);
         imageView.setImageBitmap(previewBitmap);
+        imageView.setOnTouchListener((view, event) -> handlePreviewTouch(event));
         imageFrame.addView(imageView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         cropOverlayView = new CropOverlayView(this, geometry);
@@ -208,29 +221,56 @@ public final class MainActivity extends Activity {
         });
         imageFrame.addView(cropOverlayView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        imageFrame.setOnTouchListener((view, event) -> handlePreviewTouch(event));
         return imageFrame;
+    }
+
+    private boolean handlePreviewTouch(MotionEvent event) {
+        if (activePanel == PANEL_SIZE) {
+            return false;
+        }
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            previewCompareArmed = true;
+            renderHandler.postDelayed(previewCompareRunnable, ViewConfiguration.getLongPressTimeout());
+            return true;
+        }
+        if (event.getAction() == MotionEvent.ACTION_MOVE) {
+            return previewCompareArmed || compareActive;
+        }
+        if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+            renderHandler.removeCallbacks(previewCompareRunnable);
+            previewCompareArmed = false;
+            if (compareActive) {
+                compareActive = false;
+                renderPreview(false);
+            }
+            return true;
+        }
+        return false;
     }
 
     private View createControlPanel(boolean landscape) {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackgroundColor(Color.rgb(17, 21, 28));
+        setGradientBackground(panel, Color.rgb(16, 20, 28), Color.rgb(11, 14, 20),
+                GradientDrawable.Orientation.TOP_BOTTOM);
         panel.setPadding(landscape ? dp(10) : 0, 0, landscape ? dp(10) : 0, 0);
         panelTabs = new LinearLayout(this);
         panelTabs.setOrientation(LinearLayout.HORIZONTAL);
         panelTabs.setPadding(dp(12), dp(10), dp(12), dp(10));
-        panelTabs.setBackgroundColor(Color.rgb(15, 19, 26));
+        setGradientBackground(panelTabs, Color.rgb(20, 25, 34), Color.rgb(13, 17, 24),
+                GradientDrawable.Orientation.LEFT_RIGHT);
         panel.addView(panelTabs, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(62)));
         rebuildPanelTabs();
 
         controlScroll = new ScrollView(this);
         controlScroll.setFillViewport(false);
-        controlScroll.setBackgroundColor(Color.rgb(18, 22, 30));
+        controlScroll.setBackgroundColor(Color.rgb(14, 18, 25));
         controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setPadding(dp(18), dp(12), dp(18), landscape ? dp(28) : dp(24));
-        controls.setBackgroundColor(Color.rgb(18, 22, 30));
+        controls.setBackgroundColor(Color.rgb(14, 18, 25));
         controlScroll.addView(controls);
         panel.addView(controlScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -247,7 +287,8 @@ public final class MainActivity extends Activity {
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.setPadding(dp(14), dp(7), dp(14), dp(7));
-        toolbar.setBackgroundColor(Color.rgb(15, 18, 24));
+        setGradientBackground(toolbar, Color.rgb(22, 27, 36), Color.rgb(12, 15, 21),
+                GradientDrawable.Orientation.LEFT_RIGHT);
 
         TextView title = new TextView(this);
         title.setText("MyLight");
@@ -271,6 +312,10 @@ public final class MainActivity extends Activity {
         Button undoButton = createButton("撤销");
         undoButton.setOnClickListener(v -> undoLastEdit());
         addToolbarButton(actions, undoButton);
+
+        Button redoButton = createButton("重做");
+        redoButton.setOnClickListener(v -> redoLastEdit());
+        addToolbarButton(actions, redoButton);
 
         Button compareButton = createButton("对比");
         compareButton.setOnTouchListener((view, event) -> {
@@ -316,7 +361,8 @@ public final class MainActivity extends Activity {
     }
 
     private void addPanelTab(String label, int panel) {
-        Button button = createButton(label, activePanel == panel);
+        String displayLabel = panelHasChanges(panel) ? label + " •" : label;
+        Button button = createButton(displayLabel, activePanel == panel);
         button.setTypeface(Typeface.DEFAULT, activePanel == panel ? Typeface.BOLD : Typeface.NORMAL);
         button.setOnClickListener(v -> {
             activePanel = panel;
@@ -330,6 +376,9 @@ public final class MainActivity extends Activity {
     }
 
     private void renderControls() {
+        if (panelTabs != null) {
+            rebuildPanelTabs();
+        }
         controls.removeAllViews();
         sliderBindings.clear();
         curveView = null;
@@ -411,6 +460,12 @@ public final class MainActivity extends Activity {
     private void renderColorPanel() {
         controls.addView(createSectionLabel("预设滤镜"));
         controls.addView(createPresetStrip());
+        if (activeFilterPreset != null) {
+            addSlider("滤镜强度", filterStrength, 0f, 1f, value -> {
+                filterStrength = value;
+                applyFilterStrength();
+            });
+        }
         controls.addView(createSectionLabel("基础色彩"));
         addSlider("明亮度", adjustments.brightness, -1f, 1f, value -> adjustments.brightness = value);
         addSlider("高光", adjustments.highlights, -1f, 1f, value -> adjustments.highlights = value);
@@ -460,6 +515,7 @@ public final class MainActivity extends Activity {
             @Override
             public void onCurveChanged(boolean finished) {
                 if (finished) {
+                    rebuildPanelTabs();
                     renderPreview(false);
                 } else {
                     renderInteractivePreview();
@@ -496,8 +552,7 @@ public final class MainActivity extends Activity {
         row.setPadding(0, 0, 0, dp(10));
         Preset lastEdit = loadLastEditPreset();
         if (lastEdit != null) {
-            Button button = createButton("上次修改", true);
-            button.setOnClickListener(v -> applyPreset(lastEdit));
+            Button button = createPresetButton("上次修改", true, lastEdit);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(112), dp(42));
             params.rightMargin = dp(8);
             row.addView(button, params);
@@ -508,15 +563,24 @@ public final class MainActivity extends Activity {
         saveParams.rightMargin = dp(8);
         row.addView(saveFilterButton, saveParams);
         for (Preset preset : Preset.defaults()) {
-            Button button = createButton(preset.name);
-            button.setOnClickListener(v -> applyPreset(preset));
+            Button button = createPresetButton(preset.name, false, preset);
+            button.setOnLongClickListener(v -> {
+                Toast.makeText(this, "默认滤镜不可管理，可保存为自定义滤镜", Toast.LENGTH_SHORT).show();
+                return true;
+            });
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(92), dp(42));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
-        for (Preset preset : loadCustomPresets()) {
-            Button button = createButton(preset.name);
-            button.setOnClickListener(v -> applyPreset(preset));
+        List<Preset> customPresets = loadCustomPresets();
+        for (int i = 0; i < customPresets.size(); i++) {
+            final int index = i;
+            Preset preset = customPresets.get(i);
+            Button button = createPresetButton(preset.name, false, preset);
+            button.setOnLongClickListener(v -> {
+                showCustomPresetMenu(index, preset.name);
+                return true;
+            });
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(104), dp(42));
             params.rightMargin = dp(8);
             row.addView(button, params);
@@ -525,14 +589,24 @@ public final class MainActivity extends Activity {
         return scrollView;
     }
 
+    private Button createPresetButton(String label, boolean selected, Preset preset) {
+        Button button = createButton(label, selected || isActiveFilter(preset));
+        button.setOnClickListener(v -> applyPreset(preset));
+        return button;
+    }
+
+    private boolean isActiveFilter(Preset preset) {
+        return activeFilterPreset != null && activeFilterPreset.name.equals(preset.name);
+    }
+
     private TextView createSectionLabel(String text) {
         TextView label = new TextView(this);
         label.setText(text);
-        label.setTextColor(Color.rgb(224, 231, 240));
+        label.setTextColor(Color.rgb(238, 243, 249));
         label.setTextSize(14f);
         label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         label.setGravity(Gravity.CENTER_VERTICAL);
-        label.setPadding(dp(2), dp(16), 0, dp(9));
+        label.setPadding(dp(2), dp(18), 0, dp(10));
         return label;
     }
 
@@ -586,18 +660,28 @@ public final class MainActivity extends Activity {
     }
 
     private void addSlider(String label, float initialValue, float min, float max, SliderConsumer consumer) {
+        LinearLayout labelRow = new LinearLayout(this);
+        labelRow.setOrientation(LinearLayout.HORIZONTAL);
+        labelRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView valueLabel = new TextView(this);
         valueLabel.setTextColor(Color.rgb(232, 237, 244));
         valueLabel.setTextSize(13f);
         valueLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        controls.addView(valueLabel, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(26)));
+        labelRow.addView(valueLabel, new LinearLayout.LayoutParams(
+                0, dp(30), 1f));
+
+        int sliderAccent = sliderAccent(label);
+        Button resetButton = createButton("归零", false, Color.rgb(232, 162, 80));
+        labelRow.addView(resetButton, new LinearLayout.LayoutParams(dp(58), dp(30)));
+        controls.addView(labelRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(32)));
 
         SeekBar seekBar = new SeekBar(this);
         seekBar.setMax(200);
-        seekBar.setProgressTintList(ColorStateList.valueOf(Color.rgb(95, 179, 243)));
+        seekBar.setProgressTintList(ColorStateList.valueOf(sliderAccent));
         seekBar.setThumbTintList(ColorStateList.valueOf(Color.rgb(232, 244, 255)));
-        seekBar.setProgressBackgroundTintList(ColorStateList.valueOf(Color.rgb(47, 54, 65)));
+        seekBar.setProgressBackgroundTintList(ColorStateList.valueOf(blend(Color.rgb(43, 50, 62),
+                sliderAccent, 0.16f)));
         seekBar.setSplitTrack(false);
         SliderBinding binding = new SliderBinding(seekBar, initialValue, min, max);
         sliderBindings.add(binding);
@@ -626,8 +710,24 @@ public final class MainActivity extends Activity {
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
+                rebuildPanelTabs();
                 renderPreview(false);
             }
+        });
+        resetButton.setOnClickListener(v -> {
+            float resetValue = min <= 0f && max >= 0f ? 0f : min;
+            if (Math.abs(binding.value - resetValue) < 0.0001f) {
+                return;
+            }
+            pushUndoSnapshot();
+            consumer.accept(resetValue);
+            binding.value = resetValue;
+            suppressSliderEvents = true;
+            setSeekValue(seekBar, resetValue, min, max);
+            suppressSliderEvents = false;
+            updateSliderLabel(valueLabel, label, resetValue);
+            renderControls();
+            renderPreview(false);
         });
         LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
@@ -657,11 +757,21 @@ public final class MainActivity extends Activity {
 
     private void applyPreset(Preset preset) {
         pushUndoSnapshot();
-        ColorAdjustments presetAdjustments = preset.adjustments.copy();
-        copyAdjustments(presetAdjustments, adjustments);
-        curves = preset.newCurves();
+        activeFilterPreset = preset;
+        filterBaseAdjustments = adjustments.copy();
+        filterBaseCurves = curves.copy();
+        filterStrength = 1f;
+        applyFilterStrength();
         renderControls();
         renderPreview();
+    }
+
+    private void applyFilterStrength() {
+        if (activeFilterPreset == null || filterBaseAdjustments == null || filterBaseCurves == null) {
+            return;
+        }
+        mixAdjustments(filterBaseAdjustments, activeFilterPreset.adjustments, filterStrength, adjustments);
+        curves = mixCurves(filterBaseCurves, activeFilterPreset.curves, filterStrength);
     }
 
     private void resetAll() {
@@ -670,6 +780,10 @@ public final class MainActivity extends Activity {
     }
 
     private void resetAllInternal() {
+        activeFilterPreset = null;
+        filterBaseAdjustments = null;
+        filterBaseCurves = null;
+        filterStrength = 1f;
         geometry.reset();
         adjustments.reset();
         curves.reset();
@@ -817,6 +931,7 @@ public final class MainActivity extends Activity {
                         cropOverlayView.setImageSize(scaled.getWidth(), scaled.getHeight());
                     }
                     undoStack.clear();
+                    redoStack.clear();
                     resetAllInternal();
                 });
             } catch (IOException exception) {
@@ -970,6 +1085,79 @@ public final class MainActivity extends Activity {
             Toast.makeText(this, "已保存滤镜", Toast.LENGTH_SHORT).show();
         } catch (JSONException exception) {
             Toast.makeText(this, "滤镜保存失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showCustomPresetMenu(int index, String currentName) {
+        new AlertDialog.Builder(this)
+                .setTitle(currentName)
+                .setItems(new String[] {"重命名", "删除"}, (dialog, which) -> {
+                    if (which == 0) {
+                        showRenameFilterDialog(index, currentName);
+                    } else {
+                        confirmDeleteFilter(index, currentName);
+                    }
+                })
+                .show();
+    }
+
+    private void showRenameFilterDialog(int index, String currentName) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(currentName);
+        input.setSelectAllOnFocus(true);
+        new AlertDialog.Builder(this)
+                .setTitle("重命名滤镜")
+                .setView(input)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", (dialog, which) ->
+                        renameCustomFilter(index, input.getText().toString()))
+                .show();
+    }
+
+    private void confirmDeleteFilter(int index, String name) {
+        new AlertDialog.Builder(this)
+                .setTitle("删除滤镜")
+                .setMessage("删除「" + name + "」？")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除", (dialog, which) -> deleteCustomFilter(index))
+                .show();
+    }
+
+    private void renameCustomFilter(int index, String rawName) {
+        String name = rawName == null ? "" : rawName.trim();
+        if (name.isEmpty()) {
+            Toast.makeText(this, "名称不能为空", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            JSONArray presets = new JSONArray(preferences.getString(KEY_CUSTOM_PRESETS, "[]"));
+            if (index < 0 || index >= presets.length()) {
+                return;
+            }
+            presets.getJSONObject(index).put("name", name);
+            preferences.edit().putString(KEY_CUSTOM_PRESETS, presets.toString()).apply();
+            clearActiveFilter();
+            renderControls();
+            Toast.makeText(this, "已重命名", Toast.LENGTH_SHORT).show();
+        } catch (JSONException exception) {
+            Toast.makeText(this, "重命名失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void deleteCustomFilter(int index) {
+        try {
+            JSONArray presets = new JSONArray(preferences.getString(KEY_CUSTOM_PRESETS, "[]"));
+            if (index < 0 || index >= presets.length()) {
+                return;
+            }
+            presets.remove(index);
+            preferences.edit().putString(KEY_CUSTOM_PRESETS, presets.toString()).apply();
+            clearActiveFilter();
+            renderControls();
+            Toast.makeText(this, "已删除滤镜", Toast.LENGTH_SHORT).show();
+        } catch (JSONException exception) {
+            Toast.makeText(this, "删除失败", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1181,7 +1369,7 @@ public final class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(text);
         button.setTextSize(12f);
-        button.setTextColor(selected ? Color.WHITE : Color.rgb(224, 230, 238));
+        button.setTextColor(selected ? Color.WHITE : blend(Color.rgb(226, 232, 240), accent, 0.18f));
         button.setAllCaps(false);
         button.setMinHeight(0);
         button.setMinWidth(0);
@@ -1189,13 +1377,15 @@ public final class MainActivity extends Activity {
         GradientDrawable background = new GradientDrawable();
         if (selected) {
             background.setOrientation(GradientDrawable.Orientation.LEFT_RIGHT);
-            background.setColors(new int[] {blend(Color.rgb(18, 22, 29), accent, 0.55f),
-                    blend(Color.rgb(18, 22, 29), accent, 0.82f)});
+            background.setColors(new int[] {blend(Color.rgb(18, 22, 29), accent, 0.62f),
+                    blend(Color.rgb(18, 22, 29), accent, 0.9f)});
         } else {
-            background.setColor(blend(Color.rgb(25, 30, 38), accent, 0.08f));
+            background.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM);
+            background.setColors(new int[] {blend(Color.rgb(34, 40, 51), accent, 0.12f),
+                    blend(Color.rgb(20, 25, 33), accent, 0.06f)});
         }
-        background.setStroke(dp(1), selected ? blend(Color.WHITE, accent, 0.58f)
-                : blend(Color.rgb(62, 72, 86), accent, 0.32f));
+        background.setStroke(dp(1), selected ? blend(Color.WHITE, accent, 0.5f)
+                : blend(Color.rgb(68, 78, 95), accent, 0.38f));
         background.setCornerRadius(dp(10));
         button.setBackground(background);
         return button;
@@ -1273,6 +1463,43 @@ public final class MainActivity extends Activity {
         return Color.rgb(95, 179, 243);
     }
 
+    private int sliderAccent(String label) {
+        if (label.contains("高光") || label.contains("曝光") || label.contains("明亮")) {
+            return Color.rgb(112, 188, 255);
+        }
+        if (label.contains("阴影") || label.contains("对比") || label.contains("去模糊")) {
+            return Color.rgb(139, 152, 170);
+        }
+        if (label.contains("饱和")) {
+            return Color.rgb(236, 110, 157);
+        }
+        if (label.contains("色温")) {
+            return Color.rgb(242, 163, 74);
+        }
+        if (label.contains("色调")) {
+            return Color.rgb(203, 108, 231);
+        }
+        if (label.contains("色相")) {
+            return hslColor(activeMixChannel);
+        }
+        if (label.contains("滤镜")) {
+            return Color.rgb(167, 139, 250);
+        }
+        if (label.contains("裁剪") || label.contains("旋转")) {
+            return Color.rgb(84, 197, 210);
+        }
+        if (label.contains("晕影") || label.contains("氛围") || label.contains("褪色")) {
+            return Color.rgb(216, 128, 218);
+        }
+        return Color.rgb(95, 179, 243);
+    }
+
+    private void setGradientBackground(View view, int startColor, int endColor,
+            GradientDrawable.Orientation orientation) {
+        GradientDrawable background = new GradientDrawable(orientation, new int[] {startColor, endColor});
+        view.setBackground(background);
+    }
+
     private void updateCropOverlay() {
         if (cropOverlayView == null) {
             return;
@@ -1281,8 +1508,64 @@ public final class MainActivity extends Activity {
         cropOverlayView.invalidate();
     }
 
+    private boolean panelHasChanges(int panel) {
+        if (panel == PANEL_SIZE) {
+            return geometry.cropMode != GeometryAdjustments.CROP_ORIGINAL
+                    || floatChanged(geometry.cropLeft)
+                    || floatChanged(geometry.cropTop)
+                    || floatChanged(geometry.cropRight - 1f)
+                    || floatChanged(geometry.cropBottom - 1f)
+                    || floatChanged(geometry.cropZoom)
+                    || floatChanged(geometry.rotateDegrees)
+                    || geometry.quarterTurns != 0;
+        }
+        if (panel == PANEL_CURVE) {
+            return curveChanged(curves.luminance) || curveChanged(curves.red)
+                    || curveChanged(curves.green) || curveChanged(curves.blue);
+        }
+        if (panel == PANEL_EFFECTS) {
+            return floatChanged(adjustments.vignette) || floatChanged(adjustments.dehaze)
+                    || floatChanged(adjustments.ambiance) || floatChanged(adjustments.fade);
+        }
+        return floatChanged(adjustments.brightness)
+                || floatChanged(adjustments.highlights)
+                || floatChanged(adjustments.shadows)
+                || floatChanged(adjustments.contrast)
+                || floatChanged(adjustments.saturation)
+                || floatChanged(adjustments.temperature)
+                || floatChanged(adjustments.tint)
+                || floatChanged(adjustments.exposure)
+                || colorMixChanged();
+    }
+
+    private boolean colorMixChanged() {
+        for (int i = 0; i < ColorAdjustments.MIX_COUNT; i++) {
+            if (floatChanged(adjustments.mixHue[i]) || floatChanged(adjustments.mixSaturation[i])
+                    || floatChanged(adjustments.mixLuminance[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean curveChanged(ToneCurve curve) {
+        return curve.pointCount() != 2 || curve.getX(0) != 0 || curve.getY(0) != 0
+                || curve.getX(1) != 255 || curve.getY(1) != 255;
+    }
+
+    private boolean floatChanged(float value) {
+        return Math.abs(value) > 0.0001f;
+    }
+
     private void pushUndoSnapshot() {
+        pushUndoSnapshot(true);
+    }
+
+    private void pushUndoSnapshot(boolean clearRedo) {
         undoStack.push(new EditSnapshot(geometry.copy(), adjustments.copy(), curves.copy()));
+        if (clearRedo) {
+            redoStack.clear();
+        }
         while (undoStack.size() > MAX_UNDO_STEPS) {
             undoStack.removeLast();
         }
@@ -1294,13 +1577,35 @@ public final class MainActivity extends Activity {
             return;
         }
         EditSnapshot snapshot = undoStack.pop();
+        redoStack.push(new EditSnapshot(geometry.copy(), adjustments.copy(), curves.copy()));
+        while (redoStack.size() > MAX_UNDO_STEPS) {
+            redoStack.removeLast();
+        }
         compareActive = false;
+        clearActiveFilter();
         copyGeometry(snapshot.geometry, geometry);
         copyAdjustments(snapshot.adjustments, adjustments);
         curves = snapshot.curves.copy();
         renderControls();
         renderPreview(false);
         Toast.makeText(this, "已撤销", Toast.LENGTH_SHORT).show();
+    }
+
+    private void redoLastEdit() {
+        if (redoStack.isEmpty()) {
+            Toast.makeText(this, "没有可重做的修改", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        EditSnapshot snapshot = redoStack.pop();
+        pushUndoSnapshot(false);
+        compareActive = false;
+        clearActiveFilter();
+        copyGeometry(snapshot.geometry, geometry);
+        copyAdjustments(snapshot.adjustments, adjustments);
+        curves = snapshot.curves.copy();
+        renderControls();
+        renderPreview(false);
+        Toast.makeText(this, "已重做", Toast.LENGTH_SHORT).show();
     }
 
     private static void copyGeometry(GeometryAdjustments source, GeometryAdjustments target) {
@@ -1337,6 +1642,56 @@ public final class MainActivity extends Activity {
         System.arraycopy(source.mixHue, 0, target.mixHue, 0, source.mixHue.length);
         System.arraycopy(source.mixSaturation, 0, target.mixSaturation, 0, source.mixSaturation.length);
         System.arraycopy(source.mixLuminance, 0, target.mixLuminance, 0, source.mixLuminance.length);
+    }
+
+    private static void mixAdjustments(ColorAdjustments start, ColorAdjustments end, float amount,
+            ColorAdjustments target) {
+        target.brightness = lerp(start.brightness, end.brightness, amount);
+        target.contrast = lerp(start.contrast, end.contrast, amount);
+        target.saturation = lerp(start.saturation, end.saturation, amount);
+        target.temperature = lerp(start.temperature, end.temperature, amount);
+        target.tint = lerp(start.tint, end.tint, amount);
+        target.exposure = lerp(start.exposure, end.exposure, amount);
+        target.highlights = lerp(start.highlights, end.highlights, amount);
+        target.shadows = lerp(start.shadows, end.shadows, amount);
+        target.fade = lerp(start.fade, end.fade, amount);
+        target.vignette = lerp(start.vignette, end.vignette, amount);
+        target.dehaze = lerp(start.dehaze, end.dehaze, amount);
+        target.ambiance = lerp(start.ambiance, end.ambiance, amount);
+        for (int i = 0; i < ColorAdjustments.MIX_COUNT; i++) {
+            target.mixHue[i] = lerp(start.mixHue[i], end.mixHue[i], amount);
+            target.mixSaturation[i] = lerp(start.mixSaturation[i], end.mixSaturation[i], amount);
+            target.mixLuminance[i] = lerp(start.mixLuminance[i], end.mixLuminance[i], amount);
+        }
+    }
+
+    private static CurveSet mixCurves(CurveSet start, CurveSet end, float amount) {
+        CurveSet mixed = new CurveSet();
+        mixCurve(start.luminance, end.luminance, amount, mixed.luminance);
+        mixCurve(start.red, end.red, amount, mixed.red);
+        mixCurve(start.green, end.green, amount, mixed.green);
+        mixCurve(start.blue, end.blue, amount, mixed.blue);
+        return mixed;
+    }
+
+    private static void mixCurve(ToneCurve start, ToneCurve end, float amount, ToneCurve target) {
+        int[] values = new int[5];
+        int[] samples = {0, 64, 128, 192, 255};
+        for (int i = 0; i < samples.length; i++) {
+            values[i] = Math.round(lerp(start.map(samples[i]), end.map(samples[i]), amount));
+        }
+        target.setFixedPoints(values);
+    }
+
+    private static float lerp(float start, float end, float amount) {
+        return start + (end - start) * amount;
+    }
+
+    private void clearActiveFilter() {
+        activeFilterPreset = null;
+        filterBaseAdjustments = null;
+        filterBaseCurves = null;
+        filterStrength = 1f;
     }
 
     private static final class EditSnapshot {
