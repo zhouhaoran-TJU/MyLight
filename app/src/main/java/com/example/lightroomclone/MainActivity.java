@@ -6,6 +6,7 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -26,6 +27,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -82,6 +84,7 @@ public final class MainActivity extends Activity {
     private GpuImageView imageView;
     private LinearLayout panelTabs;
     private LinearLayout controls;
+    private ScrollView controlScroll;
     private Bitmap originalBitmap;
     private Bitmap fastSourceBitmap;
     private Bitmap qualitySourceBitmap;
@@ -119,6 +122,14 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        setContentView(createContentView());
+        renderControls();
+        renderPreview(false);
+    }
+
+    @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (resultCode != RESULT_OK || data == null || data.getData() == null) {
@@ -140,6 +151,28 @@ public final class MainActivity extends Activity {
         root.addView(createToolbar(), new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(56)));
 
+        boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        if (landscape) {
+            LinearLayout workspace = new LinearLayout(this);
+            workspace.setOrientation(LinearLayout.HORIZONTAL);
+            workspace.setBackgroundColor(Color.rgb(8, 10, 14));
+            root.addView(workspace, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+            workspace.addView(createImageFrame(), new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+            workspace.addView(createControlPanel(true), new LinearLayout.LayoutParams(
+                    landscapePanelWidth(), LinearLayout.LayoutParams.MATCH_PARENT));
+        } else {
+            root.addView(createImageFrame(), new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+            root.addView(createControlPanel(false), new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(418)));
+        }
+        return root;
+    }
+
+    private View createImageFrame() {
         FrameLayout imageFrame = new FrameLayout(this);
         imageFrame.setBackgroundColor(Color.rgb(6, 7, 10));
         imageView = new GpuImageView(this);
@@ -161,27 +194,39 @@ public final class MainActivity extends Activity {
         });
         imageFrame.addView(cropOverlayView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-        root.addView(imageFrame, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        return imageFrame;
+    }
 
+    private View createControlPanel(boolean landscape) {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundColor(Color.rgb(17, 21, 28));
+        panel.setPadding(landscape ? dp(10) : 0, 0, landscape ? dp(10) : 0, 0);
         panelTabs = new LinearLayout(this);
         panelTabs.setOrientation(LinearLayout.HORIZONTAL);
-        panelTabs.setPadding(dp(14), dp(10), dp(14), dp(10));
-        panelTabs.setBackgroundColor(Color.rgb(12, 15, 20));
-        root.addView(panelTabs, new LinearLayout.LayoutParams(
+        panelTabs.setPadding(dp(12), dp(10), dp(12), dp(10));
+        panelTabs.setBackgroundColor(Color.rgb(15, 19, 26));
+        panel.addView(panelTabs, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(62)));
         rebuildPanelTabs();
 
-        ScrollView controlScroll = new ScrollView(this);
+        controlScroll = new ScrollView(this);
         controlScroll.setFillViewport(false);
+        controlScroll.setBackgroundColor(Color.rgb(18, 22, 30));
         controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
-        controls.setPadding(dp(18), dp(12), dp(18), dp(22));
-        controls.setBackgroundColor(Color.rgb(18, 21, 27));
+        controls.setPadding(dp(18), dp(12), dp(18), landscape ? dp(28) : dp(24));
+        controls.setBackgroundColor(Color.rgb(18, 22, 30));
         controlScroll.addView(controls);
-        root.addView(controlScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(356)));
-        return root;
+        panel.addView(controlScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        return panel;
+    }
+
+    private int landscapePanelWidth() {
+        int widthPixels = getResources().getDisplayMetrics().widthPixels;
+        int target = Math.round(widthPixels * 0.38f);
+        return Math.max(dp(330), Math.min(dp(430), target));
     }
 
     private View createToolbar() {
@@ -328,11 +373,11 @@ public final class MainActivity extends Activity {
         addSlider("曝光", adjustments.exposure, -1f, 1f, value -> adjustments.exposure = value);
 
         controls.addView(createSectionLabel("原色 / HSL"));
-        LinearLayout row = createButtonRow();
+        GridLayout row = createButtonGrid(4);
         String[] names = {"红", "橙", "黄", "绿", "青", "蓝", "紫", "洋红"};
         for (int i = 0; i < names.length; i++) {
             final int channel = i;
-            addModeButton(row, names[i], activeMixChannel == channel, () -> {
+            addColorModeButton(row, names[i], hslColor(channel), activeMixChannel == channel, () -> {
                 activeMixChannel = channel;
                 renderControls();
             });
@@ -440,6 +485,15 @@ public final class MainActivity extends Activity {
         return row;
     }
 
+    private GridLayout createButtonGrid(int columns) {
+        GridLayout grid = new GridLayout(this);
+        grid.setColumnCount(columns);
+        grid.setPadding(0, 0, 0, dp(10));
+        grid.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        return grid;
+    }
+
     private void addModeButton(LinearLayout row, String label, boolean selected, Runnable action) {
         Button button = createButton(label, selected);
         button.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
@@ -448,6 +502,18 @@ public final class MainActivity extends Activity {
         params.leftMargin = dp(3);
         params.rightMargin = dp(3);
         row.addView(button, params);
+    }
+
+    private void addColorModeButton(GridLayout grid, String label, int accent, boolean selected, Runnable action) {
+        Button button = createButton(label, selected, accent);
+        button.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
+        button.setOnClickListener(v -> action.run());
+        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+        params.width = 0;
+        params.height = dp(44);
+        params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        params.setMargins(dp(3), dp(3), dp(3), dp(5));
+        grid.addView(button, params);
     }
 
     private void addCurveButton(LinearLayout row, String label, int channel, int color) {
@@ -1024,6 +1090,10 @@ public final class MainActivity extends Activity {
     }
 
     private Button createButton(String text, boolean selected) {
+        return createButton(text, selected, semanticAccent(text));
+    }
+
+    private Button createButton(String text, boolean selected, int accent) {
         Button button = new Button(this);
         button.setText(text);
         button.setTextSize(12f);
@@ -1033,7 +1103,6 @@ public final class MainActivity extends Activity {
         button.setMinWidth(0);
         button.setPadding(dp(8), 0, dp(8), 0);
         GradientDrawable background = new GradientDrawable();
-        int accent = semanticAccent(text);
         if (selected) {
             background.setOrientation(GradientDrawable.Orientation.LEFT_RIGHT);
             background.setColors(new int[] {blend(Color.rgb(18, 22, 29), accent, 0.55f),
@@ -1074,6 +1143,29 @@ public final class MainActivity extends Activity {
             return Color.rgb(212, 126, 214);
         }
         return Color.rgb(95, 179, 243);
+    }
+
+    private int hslColor(int channel) {
+        switch (channel) {
+            case ColorAdjustments.MIX_RED:
+                return Color.rgb(237, 82, 82);
+            case ColorAdjustments.MIX_ORANGE:
+                return Color.rgb(238, 145, 62);
+            case ColorAdjustments.MIX_YELLOW:
+                return Color.rgb(231, 196, 67);
+            case ColorAdjustments.MIX_GREEN:
+                return Color.rgb(91, 190, 117);
+            case ColorAdjustments.MIX_AQUA:
+                return Color.rgb(72, 190, 196);
+            case ColorAdjustments.MIX_BLUE:
+                return Color.rgb(88, 138, 239);
+            case ColorAdjustments.MIX_PURPLE:
+                return Color.rgb(152, 112, 242);
+            case ColorAdjustments.MIX_MAGENTA:
+                return Color.rgb(225, 92, 189);
+            default:
+                return Color.rgb(95, 179, 243);
+        }
     }
 
     private int blend(int base, int accent, float amount) {
