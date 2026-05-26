@@ -287,24 +287,55 @@ function addSlider(label, value, min, max, onChange) {
   wrap.className = "slider";
   const labelEl = document.createElement("label");
   const name = document.createElement("span");
-  const output = document.createElement("output");
   name.textContent = label;
-  output.textContent = format(value);
-  labelEl.append(name, output);
+  labelEl.append(name);
 
-  const input = document.createElement("input");
-  input.type = "range";
-  input.min = String(min);
-  input.max = String(max);
-  input.step = "0.01";
-  input.value = String(value);
-  input.addEventListener("input", () => {
-    const next = Number(input.value);
+  const rangeInput = document.createElement("input");
+  rangeInput.type = "range";
+  rangeInput.min = String(min);
+  rangeInput.max = String(max);
+  rangeInput.step = String((max - min) / 200);
+  rangeInput.value = String(value);
+
+  const valueInput = document.createElement("input");
+  valueInput.className = "value-input";
+  valueInput.type = "number";
+  valueInput.min = String(min);
+  valueInput.max = String(max);
+  valueInput.step = "0.01";
+  valueInput.value = format(value);
+
+  function setSliderValue(rawValue) {
+    if (!Number.isFinite(rawValue)) {
+      valueInput.value = format(Number(rangeInput.value));
+      return;
+    }
+    const step = Number(rangeInput.step) || 0.01;
+    const clamped = clamp(rawValue, min, max);
+    const next = clamp(min + Math.round((clamped - min) / step) * step, min, max);
+    rangeInput.value = String(next);
+    valueInput.value = format(next);
     onChange(next);
-    output.textContent = format(next);
     requestPreviewRender();
+  }
+
+  rangeInput.addEventListener("input", () => {
+    setSliderValue(Number(rangeInput.value));
   });
-  wrap.append(labelEl, input);
+  rangeInput.addEventListener("dblclick", (event) => {
+    const rect = rangeInput.getBoundingClientRect();
+    const direction = event.clientX < rect.left + rect.width * 0.5 ? -1 : 1;
+    setSliderValue(Number(rangeInput.value) + direction * (Number(rangeInput.step) || 0.01));
+  });
+  valueInput.addEventListener("change", () => {
+    setSliderValue(Number(valueInput.value));
+  });
+  valueInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      valueInput.blur();
+    }
+  });
+  wrap.append(labelEl, rangeInput, valueInput);
   controls.appendChild(wrap);
 }
 

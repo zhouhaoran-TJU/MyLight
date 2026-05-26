@@ -22,11 +22,13 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -877,12 +879,24 @@ public final class MainActivity extends Activity {
         seekBar.setSplitTrack(false);
         sliderRow.addView(seekBar, new LinearLayout.LayoutParams(0, dp(42), 1f));
 
-        TextView valueLabel = new TextView(this);
-        valueLabel.setTextColor(Color.rgb(232, 237, 244));
-        valueLabel.setTextSize(12f);
-        valueLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        valueLabel.setGravity(Gravity.CENTER);
-        sliderRow.addView(valueLabel, new LinearLayout.LayoutParams(dp(50), dp(42)));
+        EditText valueInput = new EditText(this);
+        valueInput.setTextColor(Color.rgb(232, 237, 244));
+        valueInput.setTextSize(12f);
+        valueInput.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        valueInput.setGravity(Gravity.CENTER);
+        valueInput.setSingleLine(true);
+        valueInput.setSelectAllOnFocus(true);
+        valueInput.setInputType(InputType.TYPE_CLASS_NUMBER
+                | InputType.TYPE_NUMBER_FLAG_DECIMAL
+                | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        valueInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        valueInput.setPadding(dp(4), 0, dp(4), 0);
+        GradientDrawable inputBackground = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {Color.rgb(28, 34, 44), Color.rgb(17, 21, 29)});
+        inputBackground.setStroke(dp(1), blend(Color.rgb(68, 78, 95), sliderAccent, 0.28f));
+        inputBackground.setCornerRadius(dp(8));
+        valueInput.setBackground(inputBackground);
+        sliderRow.addView(valueInput, new LinearLayout.LayoutParams(dp(58), dp(36)));
 
         Button resetButton = createButton("0", false, Color.rgb(232, 162, 80));
         sliderRow.addView(resetButton, new LinearLayout.LayoutParams(dp(38), dp(34)));
@@ -890,14 +904,15 @@ public final class MainActivity extends Activity {
         SliderBinding binding = new SliderBinding(seekBar, initialValue, min, max);
         sliderBindings.add(binding);
         setSeekValue(seekBar, initialValue, min, max);
-        updateSliderLabel(valueLabel, label, initialValue);
+        updateSliderLabel(valueInput, label, initialValue);
+        attachSliderDoubleTap(seekBar, binding, valueInput, nameLabel, label, min, max, consumer);
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float value = min + (max - min) * progress / 200f;
                 consumer.accept(value);
                 binding.value = value;
-                updateSliderLabel(valueLabel, label, value);
+                updateSliderLabel(valueInput, label, value);
                 nameLabel.setTextColor(floatChanged(value) ? Color.WHITE : Color.rgb(202, 211, 224));
                 nameLabel.setTypeface(Typeface.DEFAULT, floatChanged(value) ? Typeface.BOLD : Typeface.NORMAL);
                 if (!suppressSliderEvents) {
@@ -920,6 +935,19 @@ public final class MainActivity extends Activity {
                 renderPreview(false);
             }
         });
+        valueInput.setOnEditorActionListener((view, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_DONE || actionId == EditorInfo.IME_ACTION_UNSPECIFIED) {
+                commitSliderInput(valueInput, seekBar, binding, nameLabel, label, min, max, consumer);
+                valueInput.clearFocus();
+                return true;
+            }
+            return false;
+        });
+        valueInput.setOnFocusChangeListener((view, hasFocus) -> {
+            if (!hasFocus) {
+                commitSliderInput(valueInput, seekBar, binding, nameLabel, label, min, max, consumer);
+            }
+        });
         resetButton.setOnClickListener(v -> {
             float resetValue = min <= 0f && max >= 0f ? 0f : min;
             if (Math.abs(binding.value - resetValue) < 0.0001f) {
@@ -931,7 +959,7 @@ public final class MainActivity extends Activity {
             suppressSliderEvents = true;
             setSeekValue(seekBar, resetValue, min, max);
             suppressSliderEvents = false;
-            updateSliderLabel(valueLabel, label, resetValue);
+            updateSliderLabel(valueInput, label, resetValue);
             nameLabel.setTextColor(Color.rgb(202, 211, 224));
             nameLabel.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
             renderControls();
@@ -941,13 +969,96 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(56)));
     }
 
+    private void attachSliderDoubleTap(SeekBar seekBar, SliderBinding binding, TextView valueLabel,
+            TextView nameLabel, String label, float min, float max, SliderConsumer consumer) {
+        final long[] lastTapTime = {0L};
+        final float[] lastTapX = {0f};
+        final boolean[] consumingDoubleTap = {false};
+        seekBar.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                long now = event.getEventTime();
+                boolean isDoubleTap = now - lastTapTime[0] <= ViewConfiguration.getDoubleTapTimeout()
+                        && Math.abs(event.getX() - lastTapX[0]) <= dp(48);
+                if (isDoubleTap) {
+                    consumingDoubleTap[0] = true;
+                    lastTapTime[0] = 0L;
+                    float direction = event.getX() < view.getWidth() * 0.5f ? -1f : 1f;
+                    applySliderValue(seekBar, binding, valueLabel, nameLabel, label,
+                            binding.value + direction * sliderStep(min, max), min, max, consumer, true);
+                    return true;
+                }
+                consumingDoubleTap[0] = false;
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                if (consumingDoubleTap[0]) {
+                    consumingDoubleTap[0] = false;
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP) {
+                    lastTapTime[0] = event.getEventTime();
+                    lastTapX[0] = event.getX();
+                }
+            }
+            return false;
+        });
+    }
+
+    private void commitSliderInput(EditText input, SeekBar seekBar, SliderBinding binding,
+            TextView nameLabel, String label, float min, float max, SliderConsumer consumer) {
+        String rawValue = input.getText().toString().trim();
+        if (rawValue.isEmpty() || "-".equals(rawValue) || ".".equals(rawValue) || "-.".equals(rawValue)) {
+            updateSliderLabel(input, label, binding.value);
+            return;
+        }
+        try {
+            applySliderValue(seekBar, binding, input, nameLabel, label,
+                    Float.parseFloat(rawValue), min, max, consumer, true);
+        } catch (NumberFormatException exception) {
+            updateSliderLabel(input, label, binding.value);
+            Toast.makeText(this, "请输入有效数值", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void applySliderValue(SeekBar seekBar, SliderBinding binding, TextView valueLabel,
+            TextView nameLabel, String label, float value, float min, float max,
+            SliderConsumer consumer, boolean pushUndo) {
+        float clamped = clamp(value, min, max);
+        int progress = sliderProgress(clamped, min, max);
+        float steppedValue = min + (max - min) * progress / 200f;
+        if (Math.abs(binding.value - steppedValue) < 0.0001f) {
+            updateSliderLabel(valueLabel, label, steppedValue);
+            return;
+        }
+        if (pushUndo) {
+            pushUndoSnapshot();
+        }
+        suppressSliderEvents = true;
+        seekBar.setProgress(progress);
+        suppressSliderEvents = false;
+        consumer.accept(steppedValue);
+        binding.value = steppedValue;
+        updateSliderLabel(valueLabel, label, steppedValue);
+        nameLabel.setTextColor(floatChanged(steppedValue) ? Color.WHITE : Color.rgb(202, 211, 224));
+        nameLabel.setTypeface(Typeface.DEFAULT, floatChanged(steppedValue) ? Typeface.BOLD : Typeface.NORMAL);
+        rebuildPanelTabs();
+        renderPreview(false);
+    }
+
     private void updateSliderLabel(TextView label, String name, float value) {
         label.setText(String.format(java.util.Locale.US, "%.2f", value));
     }
 
     private void setSeekValue(SeekBar seekBar, float value, float min, float max) {
+        seekBar.setProgress(sliderProgress(value, min, max));
+    }
+
+    private int sliderProgress(float value, float min, float max) {
         int progress = Math.round((value - min) * 200f / (max - min));
-        seekBar.setProgress(Math.max(0, Math.min(200, progress)));
+        return Math.max(0, Math.min(200, progress));
+    }
+
+    private float sliderStep(float min, float max) {
+        return (max - min) / 200f;
     }
 
     private void setCropMode(int mode) {

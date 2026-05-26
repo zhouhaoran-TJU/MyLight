@@ -218,13 +218,25 @@ button {
   grid-column: 1 / 2;
 }
 
-.slider output {
+.slider .value-input {
   color: #93a0b1;
   grid-column: 3 / 4;
-  text-align: right;
+  width: 100%;
+  height: 32px;
+  border: 1px solid #3d485b;
+  border-radius: 8px;
+  background: #121822;
+  text-align: center;
+  outline: none;
 }
 
-.slider input {
+.slider .value-input:focus {
+  color: #eef6ff;
+  border-color: #5fb3f3;
+  background: #162235;
+}
+
+.slider input[type="range"] {
   grid-column: 2 / 3;
   grid-row: 1;
   width: 100%;
