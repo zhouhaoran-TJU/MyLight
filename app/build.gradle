@@ -14,4 +14,13 @@ android {
         versionCode 1
         versionName "1.0"
     }
+
+    buildTypes {
+        beta {
+            initWith debug
+            matchingFallbacks = ["debug"]
+            debuggable false
+            versionNameSuffix "-beta"
+        }
+    }
 }
