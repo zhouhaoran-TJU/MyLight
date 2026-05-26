@@ -24,6 +24,7 @@ import android.os.Looper;
 import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.widget.Button;
@@ -111,6 +112,8 @@ public final class MainActivity extends Activity {
     private CurveView curveView;
     private CropOverlayView cropOverlayView;
     private HistogramView histogramView;
+    private TextView compareLabel;
+    private TextView messageBar;
     private final Runnable qualityRenderRunnable = () -> renderPreview(false);
     private SharedPreferences preferences;
     private boolean renderInFlight;
@@ -120,6 +123,13 @@ public final class MainActivity extends Activity {
     private boolean previewCompareArmed;
     private boolean histogramExpanded;
     private Uri originalImageUri;
+    private ScaleGestureDetector previewScaleDetector;
+    private float previewZoom = 1f;
+    private float previewPanX;
+    private float previewPanY;
+    private float lastPreviewTouchX;
+    private float lastPreviewTouchY;
+    private boolean previewPanning;
     private Preset activeFilterPreset;
     private ColorAdjustments filterBaseAdjustments;
     private CurveSet filterBaseCurves;
@@ -134,6 +144,14 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        previewScaleDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override
+            public boolean onScale(ScaleGestureDetector detector) {
+                previewZoom = clamp(previewZoom * detector.getScaleFactor(), 1f, 4f);
+                applyPreviewTransform();
+                return true;
+            }
+        });
         originalBitmap = createSampleBitmap(1400, 1000);
         rebuildRenderSources();
         previewBitmap = originalBitmap;
@@ -198,6 +216,11 @@ public final class MainActivity extends Activity {
             root.addView(createControlPanel(false), new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, dp(418)));
         }
+        messageBar = new TextView(this);
+        messageBar.setTextColor(Color.WHITE);
+        messageBar.setTextSize(13f);
+        messageBar.setGravity(Gravity.CENTER);
+        messageBar.setAlpha(0f);
         return root;
     }
 
@@ -209,6 +232,7 @@ public final class MainActivity extends Activity {
         imageView.setOnTouchListener((view, event) -> handlePreviewTouch(event));
         imageFrame.addView(imageView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        applyPreviewTransform();
         cropOverlayView = new CropOverlayView(this, geometry);
         cropOverlayView.setImageSize(originalBitmap.getWidth(), originalBitmap.getHeight());
         cropOverlayView.setGridMode(cropGridMode);
@@ -239,6 +263,22 @@ public final class MainActivity extends Activity {
         histogramParams.setMargins(0, dp(14), dp(14), 0);
         imageFrame.addView(histogramView, histogramParams);
         histogramView.setOnClickListener(v -> toggleHistogram());
+        compareLabel = new TextView(this);
+        compareLabel.setText("原图");
+        compareLabel.setTextColor(Color.WHITE);
+        compareLabel.setTextSize(13f);
+        compareLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        compareLabel.setGravity(Gravity.CENTER);
+        compareLabel.setPadding(dp(12), 0, dp(12), 0);
+        GradientDrawable compareBackground = new GradientDrawable();
+        compareBackground.setColor(Color.argb(190, 14, 18, 25));
+        compareBackground.setCornerRadius(dp(14));
+        compareLabel.setBackground(compareBackground);
+        compareLabel.setVisibility(View.GONE);
+        FrameLayout.LayoutParams compareParams = new FrameLayout.LayoutParams(dp(64), dp(30),
+                Gravity.LEFT | Gravity.TOP);
+        compareParams.setMargins(dp(14), dp(14), 0, 0);
+        imageFrame.addView(compareLabel, compareParams);
         imageFrame.setOnTouchListener((view, event) -> handlePreviewTouch(event));
         return imageFrame;
     }
@@ -260,17 +300,41 @@ public final class MainActivity extends Activity {
         if (activePanel == PANEL_SIZE) {
             return false;
         }
+        if (previewScaleDetector != null) {
+            previewScaleDetector.onTouchEvent(event);
+        }
+        if (event.getPointerCount() > 1) {
+            renderHandler.removeCallbacks(previewCompareRunnable);
+            previewCompareArmed = false;
+            return true;
+        }
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            lastPreviewTouchX = event.getX();
+            lastPreviewTouchY = event.getY();
+            previewPanning = previewZoom > 1.01f;
             previewCompareArmed = true;
-            renderHandler.postDelayed(previewCompareRunnable, ViewConfiguration.getLongPressTimeout());
+            if (!previewPanning) {
+                renderHandler.postDelayed(previewCompareRunnable, ViewConfiguration.getLongPressTimeout());
+            }
             return true;
         }
         if (event.getAction() == MotionEvent.ACTION_MOVE) {
+            if (previewPanning) {
+                float dx = event.getX() - lastPreviewTouchX;
+                float dy = event.getY() - lastPreviewTouchY;
+                previewPanX += dx;
+                previewPanY += dy;
+                lastPreviewTouchX = event.getX();
+                lastPreviewTouchY = event.getY();
+                applyPreviewTransform();
+                return true;
+            }
             return previewCompareArmed || compareActive;
         }
         if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
             renderHandler.removeCallbacks(previewCompareRunnable);
             previewCompareArmed = false;
+            previewPanning = false;
             if (compareActive) {
                 compareActive = false;
                 renderPreview(false);
@@ -278,6 +342,25 @@ public final class MainActivity extends Activity {
             return true;
         }
         return false;
+    }
+
+    private void applyPreviewTransform() {
+        if (imageView == null) {
+            return;
+        }
+        if (previewZoom <= 1.01f) {
+            previewZoom = 1f;
+            previewPanX = 0f;
+            previewPanY = 0f;
+        }
+        float maxPanX = Math.max(0f, imageView.getWidth() * (previewZoom - 1f) * 0.5f);
+        float maxPanY = Math.max(0f, imageView.getHeight() * (previewZoom - 1f) * 0.5f);
+        previewPanX = clamp(previewPanX, -maxPanX, maxPanX);
+        previewPanY = clamp(previewPanY, -maxPanY, maxPanY);
+        imageView.setScaleX(previewZoom);
+        imageView.setScaleY(previewZoom);
+        imageView.setTranslationX(previewPanX);
+        imageView.setTranslationY(previewPanY);
     }
 
     private View createControlPanel(boolean landscape) {
@@ -918,6 +1001,9 @@ public final class MainActivity extends Activity {
             renderComparePreview();
             return;
         }
+        if (compareLabel != null) {
+            compareLabel.setVisibility(View.GONE);
+        }
         persistCurrentEdit();
         imageView.updateState(previewGeometry(), adjustments, curves, previewDisplayAspect());
         updateHistogramAsync();
@@ -926,6 +1012,9 @@ public final class MainActivity extends Activity {
     private void renderComparePreview() {
         if (imageView == null) {
             return;
+        }
+        if (compareLabel != null) {
+            compareLabel.setVisibility(View.VISIBLE);
         }
         imageView.updateState(previewGeometry(), new ColorAdjustments(), new CurveSet(), previewDisplayAspect());
     }
@@ -1669,6 +1758,10 @@ public final class MainActivity extends Activity {
                 Math.round(Color.blue(base) * keep + Color.blue(accent) * amount));
     }
 
+    private float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
     private int curveColor(int channel) {
         if (channel == CurveSet.RED) {
             return Color.rgb(238, 91, 91);
@@ -1725,6 +1818,12 @@ public final class MainActivity extends Activity {
         }
         cropOverlayView.setVisibility(activePanel == PANEL_SIZE ? View.VISIBLE : View.GONE);
         cropOverlayView.invalidate();
+        if (activePanel == PANEL_SIZE) {
+            previewZoom = 1f;
+            previewPanX = 0f;
+            previewPanY = 0f;
+            applyPreviewTransform();
+        }
         if (histogramView != null) {
             histogramView.setVisibility(activePanel == PANEL_SIZE ? View.GONE : View.VISIBLE);
         }

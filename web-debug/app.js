@@ -14,7 +14,7 @@ const curveColors = ["#5fb3f3", "#ee5b5b", "#65c47a", "#5d91f5"];
 
 const state = {
   source: null,
-  panel: "color",
+  panel: "filter",
   activeCurve: 0,
   activeMix: 0,
   activeCurvePoint: -1,
@@ -87,9 +87,12 @@ function renderTabs() {
   const tabs = document.querySelector("#panelTabs");
   tabs.replaceChildren();
   [
-    ["size", "尺寸"],
+    ["filter", "滤镜"],
+    ["light", "光线"],
     ["color", "色彩"],
+    ["hsl", "HSL"],
     ["curve", "曲线"],
+    ["size", "尺寸"],
     ["effects", "效果"],
   ].forEach(([key, label]) => {
     const button = createButton(label);
@@ -107,6 +110,9 @@ function renderTabs() {
 function renderControls() {
   controls.replaceChildren();
   if (state.panel === "size") renderSizePanel();
+  else if (state.panel === "filter") renderFilterPanel();
+  else if (state.panel === "light") renderLightPanel();
+  else if (state.panel === "hsl") renderHslPanel();
   else if (state.panel === "curve") renderCurvePanel();
   else if (state.panel === "effects") renderEffectsPanel();
   else renderColorPanel();
@@ -145,19 +151,29 @@ function renderSizePanel() {
   });
 }
 
-function renderColorPanel() {
+function renderFilterPanel() {
   addPresetStrip();
-  addSectionTitle("基础色彩");
+}
+
+function renderLightPanel() {
+  addSectionTitle("光线");
   const a = state.adjustments;
+  addSlider("曝光", a.exposure, -1, 1, (v) => a.exposure = v);
   addSlider("明亮度", a.brightness, -1, 1, (v) => a.brightness = v);
   addSlider("高光", a.highlights, -1, 1, (v) => a.highlights = v);
   addSlider("阴影", a.shadows, -1, 1, (v) => a.shadows = v);
   addSlider("对比度", a.contrast, -1, 1, (v) => a.contrast = v);
+}
+
+function renderColorPanel() {
+  addSectionTitle("基础色彩");
+  const a = state.adjustments;
   addSlider("饱和度", a.saturation, -1, 1, (v) => a.saturation = v);
   addSlider("色温", a.temperature, -1, 1, (v) => a.temperature = v);
   addSlider("色调", a.tint, -1, 1, (v) => a.tint = v);
-  addSlider("曝光", a.exposure, -1, 1, (v) => a.exposure = v);
+}
 
+function renderHslPanel() {
   addSectionTitle("原色 / HSL");
   addModeRow(mixNames.map((name, index) => [String(index), name]), String(state.activeMix), (value) => {
     state.activeMix = Number(value);
@@ -212,7 +228,8 @@ function addPresetStrip() {
   const row = document.createElement("nav");
   row.className = "preset-row";
   presets.forEach((preset) => {
-    const button = createButton(preset[0]);
+    const button = createButton(`${preset[0]}\n默认`);
+    button.classList.add("preset-card");
     button.addEventListener("click", () => applyPreset(preset));
     row.appendChild(button);
   });

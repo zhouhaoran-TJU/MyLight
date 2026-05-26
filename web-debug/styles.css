@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #111318;
+  background: #0b0f16;
   color: #eef2f6;
 }
 
@@ -12,7 +12,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #111318;
+  background: #0b0f16;
   overflow: hidden;
 }
 
@@ -42,7 +42,7 @@ input {
   min-width: 0;
   min-height: 0;
   padding: 18px;
-  background: #090a0d;
+  background: radial-gradient(circle at 50% 35%, #151a23 0%, #07090d 62%);
   overflow: hidden;
 }
 
@@ -51,8 +51,8 @@ input {
   width: min(100%, 1220px);
   height: auto;
   max-height: calc(100vh - 36px);
-  border: 1px solid #242a32;
-  border-radius: 4px;
+  border: 1px solid #2a3444;
+  border-radius: 8px;
   background: #0e1015;
   object-fit: contain;
 }
@@ -73,8 +73,8 @@ input {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  border-left: 1px solid #272d36;
-  background: #16191f;
+  border-left: 1px solid #2a3444;
+  background: linear-gradient(180deg, #141a24 0%, #0e1219 100%);
   padding: 16px 16px 24px;
 }
 
@@ -111,12 +111,13 @@ h2 {
 .file-button,
 button {
   min-height: 38px;
-  border: 1px solid #47515f;
-  border-radius: 6px;
-  background: #2a3039;
+  border: 1px solid #445066;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #222b39 0%, #151b25 100%);
   color: #fff;
   padding: 0 13px;
   cursor: pointer;
+  white-space: pre-line;
 }
 
 .file-button {
@@ -132,22 +133,23 @@ button {
 .panel-tabs,
 .preset-row,
 .mode-row {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
   gap: 8px;
-  overflow: visible;
+  overflow-x: auto;
   padding-bottom: 10px;
 }
 
 .panel-tabs button,
 .preset-row button,
 .mode-row button {
-  min-width: 0;
+  min-width: 74px;
 }
 
 .panel-tabs button.active,
 .mode-row button.active {
   color: #5fb3f3;
+  border-color: #5fb3f3;
+  background: linear-gradient(90deg, #1b3b56 0%, #245d86 100%);
 }
 
 .section {
@@ -178,15 +180,18 @@ button {
   max-width: 100%;
   height: auto;
   display: block;
-  border: 1px solid #343c48;
-  background: #1c1f26;
+  border: 1px solid #3a4658;
+  border-radius: 8px;
+  background: #161c26;
   touch-action: none;
 }
 
 .slider {
   display: grid;
-  gap: 5px;
-  margin: 8px 0;
+  grid-template-columns: 72px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
 }
 
 .slider label {
@@ -195,16 +200,27 @@ button {
   gap: 12px;
   color: #e3e8ef;
   font-size: 13px;
+  grid-column: 1 / 2;
 }
 
 .slider output {
   color: #93a0b1;
+  grid-column: 3 / 4;
+  text-align: right;
 }
 
 .slider input {
+  grid-column: 2 / 3;
+  grid-row: 1;
   width: 100%;
   height: 24px;
   accent-color: #5fb3f3;
+}
+
+.preset-card {
+  min-width: 96px;
+  min-height: 62px;
+  background: linear-gradient(135deg, #2a2443 0%, #142234 54%, #203126 100%);
 }
 
 .footer {
@@ -260,7 +276,7 @@ button {
   .panel-tabs,
   .preset-row,
   .mode-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
   }
 
   #curve {
