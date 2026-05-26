@@ -135,13 +135,13 @@ public final class MainActivity extends Activity {
     private View createContentView() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(12, 14, 18));
+        root.setBackgroundColor(Color.rgb(10, 12, 16));
 
         root.addView(createToolbar(), new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(56)));
 
         FrameLayout imageFrame = new FrameLayout(this);
-        imageFrame.setBackgroundColor(Color.rgb(8, 9, 12));
+        imageFrame.setBackgroundColor(Color.rgb(6, 7, 10));
         imageView = new GpuImageView(this);
         imageView.setImageBitmap(previewBitmap);
         imageFrame.addView(imageView, new FrameLayout.LayoutParams(
@@ -166,34 +166,35 @@ public final class MainActivity extends Activity {
 
         panelTabs = new LinearLayout(this);
         panelTabs.setOrientation(LinearLayout.HORIZONTAL);
-        panelTabs.setPadding(dp(12), dp(9), dp(12), dp(9));
-        panelTabs.setBackgroundColor(Color.rgb(15, 18, 23));
+        panelTabs.setPadding(dp(14), dp(10), dp(14), dp(10));
+        panelTabs.setBackgroundColor(Color.rgb(12, 15, 20));
         root.addView(panelTabs, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(58)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(62)));
         rebuildPanelTabs();
 
         ScrollView controlScroll = new ScrollView(this);
         controlScroll.setFillViewport(false);
         controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
-        controls.setPadding(dp(16), dp(10), dp(16), dp(20));
+        controls.setPadding(dp(18), dp(12), dp(18), dp(22));
         controls.setBackgroundColor(Color.rgb(18, 21, 27));
         controlScroll.addView(controls);
         root.addView(controlScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(340)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(356)));
         return root;
     }
 
     private View createToolbar() {
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        toolbar.setPadding(dp(12), dp(6), dp(12), dp(6));
-        toolbar.setBackgroundColor(Color.rgb(22, 25, 31));
+        toolbar.setPadding(dp(14), dp(7), dp(14), dp(7));
+        toolbar.setBackgroundColor(Color.rgb(15, 18, 24));
 
         TextView title = new TextView(this);
-        title.setText("ToneLab");
+        title.setText("MyLight");
         title.setTextColor(Color.WHITE);
-        title.setTextSize(20f);
+        title.setTextSize(21f);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.addView(title, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.MATCH_PARENT, 1f));
@@ -281,6 +282,7 @@ public final class MainActivity extends Activity {
             cropOverlayView.invalidate();
             renderPreview();
         });
+        addModeButton(cropRow, "完成", true, this::finishCrop);
         controls.addView(cropRow);
         addSlider("裁剪缩放", geometry.cropZoom, 0f, 1f, value -> geometry.cropZoom = value);
         addSlider("任意旋转", geometry.rotateDegrees, -45f, 45f, value -> geometry.rotateDegrees = value);
@@ -303,7 +305,17 @@ public final class MainActivity extends Activity {
         controls.addView(rotateRow);
     }
 
+    private void finishCrop() {
+        activePanel = PANEL_COLOR;
+        persistCurrentEdit();
+        rebuildPanelTabs();
+        renderControls();
+        renderPreview();
+        Toast.makeText(this, "已应用裁剪", Toast.LENGTH_SHORT).show();
+    }
+
     private void renderColorPanel() {
+        controls.addView(createSectionLabel("预设滤镜"));
         controls.addView(createPresetStrip());
         controls.addView(createSectionLabel("基础色彩"));
         addSlider("明亮度", adjustments.brightness, -1f, 1f, value -> adjustments.brightness = value);
@@ -387,6 +399,11 @@ public final class MainActivity extends Activity {
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
+        Button saveFilterButton = createButton("存为滤镜", true);
+        saveFilterButton.setOnClickListener(v -> showSaveFilterDialog());
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(112), dp(42));
+        saveParams.rightMargin = dp(8);
+        row.addView(saveFilterButton, saveParams);
         for (Preset preset : Preset.defaults()) {
             Button button = createButton(preset.name);
             button.setOnClickListener(v -> applyPreset(preset));
@@ -401,11 +418,6 @@ public final class MainActivity extends Activity {
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
-        Button saveFilterButton = createButton("存为滤镜", true);
-        saveFilterButton.setOnClickListener(v -> showSaveFilterDialog());
-        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(112), dp(42));
-        saveParams.rightMargin = dp(8);
-        row.addView(saveFilterButton, saveParams);
         scrollView.addView(row);
         return scrollView;
     }
@@ -413,18 +425,18 @@ public final class MainActivity extends Activity {
     private TextView createSectionLabel(String text) {
         TextView label = new TextView(this);
         label.setText(text);
-        label.setTextColor(Color.rgb(214, 220, 228));
+        label.setTextColor(Color.rgb(224, 231, 240));
         label.setTextSize(14f);
         label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         label.setGravity(Gravity.CENTER_VERTICAL);
-        label.setPadding(0, dp(14), 0, dp(8));
+        label.setPadding(dp(2), dp(16), 0, dp(9));
         return label;
     }
 
     private LinearLayout createButtonRow() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(0, 0, 0, dp(8));
+        row.setPadding(0, 0, 0, dp(10));
         return row;
     }
 
@@ -432,7 +444,7 @@ public final class MainActivity extends Activity {
         Button button = createButton(label, selected);
         button.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
         button.setOnClickListener(v -> action.run());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1f);
         params.leftMargin = dp(3);
         params.rightMargin = dp(3);
         row.addView(button, params);
@@ -451,7 +463,7 @@ public final class MainActivity extends Activity {
 
     private void addSlider(String label, float initialValue, float min, float max, SliderConsumer consumer) {
         TextView valueLabel = new TextView(this);
-        valueLabel.setTextColor(Color.rgb(226, 230, 236));
+        valueLabel.setTextColor(Color.rgb(232, 237, 244));
         valueLabel.setTextSize(13f);
         valueLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         controls.addView(valueLabel, new LinearLayout.LayoutParams(
@@ -492,8 +504,8 @@ public final class MainActivity extends Activity {
             }
         });
         LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
-        seekParams.bottomMargin = dp(4);
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+        seekParams.bottomMargin = dp(6);
         controls.addView(seekBar, seekParams);
     }
 
@@ -545,7 +557,16 @@ public final class MainActivity extends Activity {
             return;
         }
         persistCurrentEdit();
-        imageView.updateState(geometry, adjustments, curves);
+        imageView.updateState(previewGeometry(), adjustments, curves);
+    }
+
+    private GeometryAdjustments previewGeometry() {
+        GeometryAdjustments preview = geometry.copy();
+        if (activePanel == PANEL_SIZE) {
+            preview.setCropRect(0f, 0f, 1f, 1f);
+            preview.cropZoom = 0f;
+        }
+        return preview;
     }
 
     private void startRender(int version, boolean interactive) {
@@ -1002,9 +1023,14 @@ public final class MainActivity extends Activity {
         button.setMinWidth(0);
         button.setPadding(dp(8), 0, dp(8), 0);
         GradientDrawable background = new GradientDrawable();
-        background.setColor(selected ? Color.rgb(42, 113, 164) : Color.rgb(34, 39, 48));
-        background.setStroke(dp(1), selected ? Color.rgb(117, 196, 255) : Color.rgb(66, 75, 88));
-        background.setCornerRadius(dp(8));
+        if (selected) {
+            background.setOrientation(GradientDrawable.Orientation.LEFT_RIGHT);
+            background.setColors(new int[] {Color.rgb(42, 118, 170), Color.rgb(74, 145, 205)});
+        } else {
+            background.setColor(Color.rgb(31, 36, 45));
+        }
+        background.setStroke(dp(1), selected ? Color.rgb(132, 207, 255) : Color.rgb(62, 72, 86));
+        background.setCornerRadius(dp(10));
         button.setBackground(background);
         return button;
     }
