@@ -115,25 +115,34 @@ public final class ColorMath {
             b *= vignetteScale;
         }
 
-        if (adjustments.localEnabled > 0.5f) {
-            float dx = normalizedX - adjustments.localX;
-            float dy = normalizedY - adjustments.localY;
+        int localCount = adjustments.localCount > 0 ? adjustments.localCount
+                : (adjustments.localEnabled > 0.5f ? 1 : 0);
+        for (int i = 0; i < localCount; i++) {
+            float localX = adjustments.localCount > 0 ? adjustments.localXs[i] : adjustments.localX;
+            float localY = adjustments.localCount > 0 ? adjustments.localYs[i] : adjustments.localY;
+            float localRadius = adjustments.localCount > 0 ? adjustments.localRadii[i] : adjustments.localRadius;
+            float localFeather = adjustments.localCount > 0 ? adjustments.localFeathers[i] : adjustments.localFeather;
+            float localExposure = adjustments.localCount > 0 ? adjustments.localExposures[i] : adjustments.localExposure;
+            float localSaturation = adjustments.localCount > 0 ? adjustments.localSaturations[i] : adjustments.localSaturation;
+            float dx = normalizedX - localX;
+            float dy = normalizedY - localY;
             float distance = (float) Math.sqrt(dx * dx + dy * dy);
-            float inner = Math.max(0.01f, adjustments.localRadius * (1f - adjustments.localFeather));
-            float mask = 1f - smoothstep(inner, Math.max(inner + 0.01f, adjustments.localRadius), distance);
-            if (mask > 0f) {
-                float localExposureScale = (float) Math.pow(2f, adjustments.localExposure * mask);
-                r *= localExposureScale;
-                g *= localExposureScale;
-                b *= localExposureScale;
-                float localLuminance = r * 0.299f + g * 0.587f + b * 0.114f;
-                float localSaturationScale = adjustments.localSaturation >= 0f
-                        ? 1f + adjustments.localSaturation * 1.5f * mask
-                        : 1f + adjustments.localSaturation * mask;
-                r = localLuminance + (r - localLuminance) * localSaturationScale;
-                g = localLuminance + (g - localLuminance) * localSaturationScale;
-                b = localLuminance + (b - localLuminance) * localSaturationScale;
+            float inner = Math.max(0.01f, localRadius * (1f - localFeather));
+            float mask = 1f - smoothstep(inner, Math.max(inner + 0.01f, localRadius), distance);
+            if (mask <= 0f) {
+                continue;
             }
+            float localExposureScale = (float) Math.pow(2f, localExposure * mask);
+            r *= localExposureScale;
+            g *= localExposureScale;
+            b *= localExposureScale;
+            float localLuminance = r * 0.299f + g * 0.587f + b * 0.114f;
+            float localSaturationScale = localSaturation >= 0f
+                    ? 1f + localSaturation * 1.5f * mask
+                    : 1f + localSaturation * mask;
+            r = localLuminance + (r - localLuminance) * localSaturationScale;
+            g = localLuminance + (g - localLuminance) * localSaturationScale;
+            b = localLuminance + (b - localLuminance) * localSaturationScale;
         }
 
         int ri = redCurve[toChannel(r)];
@@ -142,7 +151,36 @@ public final class ColorMath {
         ri = luminanceCurve[ri];
         gi = luminanceCurve[gi];
         bi = luminanceCurve[bi];
+        if (adjustments.noiseReduction > 0f) {
+            float amount = adjustments.noiseReduction * 0.18f;
+            int gray = Math.round(ri * 0.299f + gi * 0.587f + bi * 0.114f);
+            ri = Math.round(ri + (gray - ri) * amount);
+            gi = Math.round(gi + (gray - gi) * amount);
+            bi = Math.round(bi + (gray - bi) * amount);
+        }
+        if (adjustments.sharpness != 0f) {
+            float scale = 1f + adjustments.sharpness * 0.45f;
+            ri = clampChannel(Math.round((ri - 128) * scale + 128));
+            gi = clampChannel(Math.round((gi - 128) * scale + 128));
+            bi = clampChannel(Math.round((bi - 128) * scale + 128));
+        }
+        if (adjustments.grain > 0f) {
+            float noise = pseudoNoise(normalizedX, normalizedY) - 0.5f;
+            int grain = Math.round(noise * adjustments.grain * 42f);
+            ri = clampChannel(ri + grain);
+            gi = clampChannel(gi + grain);
+            bi = clampChannel(bi + grain);
+        }
         return (alpha << 24) | (ri << 16) | (gi << 8) | bi;
+    }
+
+    private static int clampChannel(int value) {
+        return Math.max(0, Math.min(255, value));
+    }
+
+    private static float pseudoNoise(float x, float y) {
+        double value = Math.sin((x * 127.1 + y * 311.7) * 43758.5453);
+        return (float) (value - Math.floor(value));
     }
 
     public static int[] buildLookup(ToneCurve curve) {

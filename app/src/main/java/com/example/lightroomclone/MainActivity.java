@@ -2,10 +2,12 @@ package com.example.lightroomclone;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -13,11 +15,15 @@ import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ImageDecoder;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -26,6 +32,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.text.InputType;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -50,6 +57,7 @@ import com.example.lightroomclone.core.GeometryAdjustments;
 import com.example.lightroomclone.core.ToneCurve;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.File;
 import java.text.SimpleDateFormat;
@@ -62,6 +70,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -78,6 +87,7 @@ public final class MainActivity extends Activity {
     private static final String PREFS_NAME = "tonelab_memory";
     private static final String KEY_CUSTOM_PRESETS = "custom_presets";
     private static final String KEY_LAST_EDIT = "last_edit";
+    private static final String KEY_DRAFTS = "drafts";
     private static final String KEY_EXPORT_QUALITY = "export_quality";
     private static final String KEY_EXPORT_SIZE = "export_size";
     private static final String EXPORT_FOLDER = "MyLight";
@@ -122,6 +132,7 @@ public final class MainActivity extends Activity {
     private int cropGridMode = CropOverlayView.GRID_THIRDS;
     private CurveView curveView;
     private CropOverlayView cropOverlayView;
+    private LocalAdjustOverlayView localOverlayView;
     private HistogramView histogramView;
     private TextView compareLabel;
     private TextView messageBar;
@@ -135,6 +146,10 @@ public final class MainActivity extends Activity {
     private boolean clippingWarningEnabled;
     private boolean whiteBalancePickMode;
     private boolean localPickMode;
+    private boolean compareSliderMode;
+    private boolean localDraggingCenter;
+    private boolean localDraggingRadius;
+    private float compareSplit = 0.5f;
     private int exportQuality = 95;
     private int exportSizeMode;
     private boolean histogramExpanded;
@@ -277,6 +292,10 @@ public final class MainActivity extends Activity {
         });
         imageFrame.addView(cropOverlayView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        localOverlayView = new LocalAdjustOverlayView(this, adjustments);
+        localOverlayView.setVisibility(View.GONE);
+        imageFrame.addView(localOverlayView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         histogramView = new HistogramView(this);
         FrameLayout.LayoutParams histogramParams = new FrameLayout.LayoutParams(dp(148), dp(82),
                 Gravity.TOP | Gravity.RIGHT);
@@ -317,12 +336,20 @@ public final class MainActivity extends Activity {
     }
 
     private boolean handlePreviewTouch(MotionEvent event) {
+        if (compareSliderMode) {
+            compareSplit = clamp(event.getX() / Math.max(1f, imageView.getWidth()), 0.02f, 0.98f);
+            renderPreview(false);
+            return true;
+        }
         if (event.getAction() == MotionEvent.ACTION_DOWN && whiteBalancePickMode) {
             applyWhiteBalanceFromTap(event.getX(), event.getY());
             return true;
         }
         if (event.getAction() == MotionEvent.ACTION_DOWN && localPickMode) {
             applyLocalCenterFromTap(event.getX(), event.getY());
+            return true;
+        }
+        if (activePanel == PANEL_EFFECTS && localPointCount() > 0 && handleLocalDrag(event)) {
             return true;
         }
         if (activePanel == PANEL_SIZE) {
@@ -372,6 +399,54 @@ public final class MainActivity extends Activity {
         return false;
     }
 
+    private boolean handleLocalDrag(MotionEvent event) {
+        int index = activeLocalIndex();
+        if (index < 0 || imageView == null) {
+            return false;
+        }
+        float width = Math.max(1f, imageView.getWidth());
+        float height = Math.max(1f, imageView.getHeight());
+        float x = event.getX();
+        float y = event.getY();
+        float cx = adjustments.localXs[index] * width;
+        float cy = adjustments.localYs[index] * height;
+        float radiusPx = adjustments.localRadii[index] * Math.min(width, height);
+        float distance = (float) Math.hypot(x - cx, y - cy);
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            localDraggingCenter = distance <= dp(26);
+            localDraggingRadius = Math.abs(distance - radiusPx) <= dp(28);
+            if (localDraggingCenter || localDraggingRadius) {
+                pushUndoSnapshot("局部拖动");
+                return true;
+            }
+            return false;
+        }
+        if (event.getAction() == MotionEvent.ACTION_MOVE && (localDraggingCenter || localDraggingRadius)) {
+            if (localDraggingCenter) {
+                adjustments.localXs[index] = clamp(x / width, 0f, 1f);
+                adjustments.localYs[index] = clamp(y / height, 0f, 1f);
+            } else {
+                adjustments.localRadii[index] = clamp(distance / Math.min(width, height), 0.12f, 0.8f);
+            }
+            syncActiveLocalFromArrays();
+            if (localOverlayView != null) {
+                localOverlayView.invalidate();
+            }
+            renderInteractivePreview();
+            return true;
+        }
+        if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+            if (localDraggingCenter || localDraggingRadius) {
+                localDraggingCenter = false;
+                localDraggingRadius = false;
+                renderControls();
+                renderPreview(false);
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void applyPreviewTransform() {
         if (imageView == null) {
             return;
@@ -399,11 +474,104 @@ public final class MainActivity extends Activity {
     }
 
     private void startLocalPicker() {
+        ensureLocalPoint();
         localPickMode = true;
         whiteBalancePickMode = false;
-        adjustments.localEnabled = 1f;
         renderControls();
         Toast.makeText(this, "点一下图片设置局部调整中心", Toast.LENGTH_SHORT).show();
+    }
+
+    private void addLocalPoint() {
+        if (adjustments.localCount >= ColorAdjustments.MAX_LOCAL_POINTS) {
+            Toast.makeText(this, "最多支持 3 个局部点", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        pushUndoSnapshot("新增局部点");
+        int index = adjustments.localCount++;
+        adjustments.activeLocalIndex = index;
+        adjustments.localXs[index] = 0.5f;
+        adjustments.localYs[index] = 0.5f;
+        adjustments.localRadii[index] = 0.35f;
+        adjustments.localFeathers[index] = 0.35f;
+        adjustments.localExposures[index] = 0.25f;
+        adjustments.localSaturations[index] = 0f;
+        syncActiveLocalFromArrays();
+        renderControls();
+        renderPreview(false);
+    }
+
+    private void ensureLocalPoint() {
+        if (adjustments.localCount <= 0) {
+            int index = adjustments.localCount++;
+            adjustments.activeLocalIndex = index;
+            adjustments.localXs[index] = adjustments.localX;
+            adjustments.localYs[index] = adjustments.localY;
+            adjustments.localRadii[index] = adjustments.localRadius;
+            adjustments.localFeathers[index] = adjustments.localFeather;
+            adjustments.localExposures[index] = adjustments.localExposure;
+            adjustments.localSaturations[index] = adjustments.localSaturation;
+        }
+        syncActiveLocalFromArrays();
+    }
+
+    private void switchLocalPoint(int direction) {
+        if (adjustments.localCount <= 0) {
+            return;
+        }
+        adjustments.activeLocalIndex = (adjustments.activeLocalIndex + direction + adjustments.localCount)
+                % adjustments.localCount;
+        syncActiveLocalFromArrays();
+        renderControls();
+        renderPreview(false);
+    }
+
+    private void deleteActiveLocalPoint() {
+        if (adjustments.localCount <= 0) {
+            return;
+        }
+        pushUndoSnapshot("删除局部点");
+        int index = activeLocalIndex();
+        for (int i = index; i < adjustments.localCount - 1; i++) {
+            adjustments.localXs[i] = adjustments.localXs[i + 1];
+            adjustments.localYs[i] = adjustments.localYs[i + 1];
+            adjustments.localRadii[i] = adjustments.localRadii[i + 1];
+            adjustments.localFeathers[i] = adjustments.localFeathers[i + 1];
+            adjustments.localExposures[i] = adjustments.localExposures[i + 1];
+            adjustments.localSaturations[i] = adjustments.localSaturations[i + 1];
+        }
+        adjustments.localCount--;
+        adjustments.activeLocalIndex = Math.max(0, Math.min(adjustments.activeLocalIndex,
+                adjustments.localCount - 1));
+        syncActiveLocalFromArrays();
+        renderControls();
+        renderPreview(false);
+    }
+
+    private int localPointCount() {
+        return adjustments.localCount > 0 ? adjustments.localCount
+                : (adjustments.localEnabled > 0.5f ? 1 : 0);
+    }
+
+    private int activeLocalIndex() {
+        if (adjustments.localCount <= 0) {
+            return -1;
+        }
+        return Math.max(0, Math.min(adjustments.activeLocalIndex, adjustments.localCount - 1));
+    }
+
+    private void syncActiveLocalFromArrays() {
+        int index = activeLocalIndex();
+        if (index < 0) {
+            adjustments.localEnabled = 0f;
+            return;
+        }
+        adjustments.localEnabled = 1f;
+        adjustments.localX = adjustments.localXs[index];
+        adjustments.localY = adjustments.localYs[index];
+        adjustments.localRadius = adjustments.localRadii[index];
+        adjustments.localFeather = adjustments.localFeathers[index];
+        adjustments.localExposure = adjustments.localExposures[index];
+        adjustments.localSaturation = adjustments.localSaturations[index];
     }
 
     private void applyWhiteBalanceFromTap(float x, float y) {
@@ -434,9 +602,11 @@ public final class MainActivity extends Activity {
             return;
         }
         pushUndoSnapshot("局部中心");
-        adjustments.localEnabled = 1f;
-        adjustments.localX = clamp(x / Math.max(1f, imageView.getWidth()), 0f, 1f);
-        adjustments.localY = clamp(y / Math.max(1f, imageView.getHeight()), 0f, 1f);
+        ensureLocalPoint();
+        int index = activeLocalIndex();
+        adjustments.localXs[index] = clamp(x / Math.max(1f, imageView.getWidth()), 0f, 1f);
+        adjustments.localYs[index] = clamp(y / Math.max(1f, imageView.getHeight()), 0f, 1f);
+        syncActiveLocalFromArrays();
         localPickMode = false;
         renderControls();
         renderPreview(false);
@@ -583,11 +753,16 @@ public final class MainActivity extends Activity {
                 .setItems(new String[] {
                         "历史记录",
                         "导出设置",
+                        compareSliderMode ? "关闭滑杆对比" : "开启滑杆对比",
                         clippingWarningEnabled ? "关闭裁切警告" : "开启裁切警告",
                         "批量选择图片",
                         "批量导出当前效果",
                         "导入滤镜",
                         "导出滤镜",
+                        "保存草稿",
+                        "加载草稿",
+                        "复制滤镜分享码",
+                        "粘贴分享码导入",
                         "重置全部",
                         "重置预览缩放",
                         "长按图片可对比原图"
@@ -597,19 +772,30 @@ public final class MainActivity extends Activity {
                     } else if (which == 1) {
                         showExportSettingsDialog();
                     } else if (which == 2) {
-                        clippingWarningEnabled = !clippingWarningEnabled;
+                        compareSliderMode = !compareSliderMode;
                         renderPreview(false);
                     } else if (which == 3) {
-                        openBatchImages();
+                        clippingWarningEnabled = !clippingWarningEnabled;
+                        renderPreview(false);
                     } else if (which == 4) {
-                        exportBatchImages();
+                        openBatchImages();
                     } else if (which == 5) {
-                        showImportFiltersDialog();
+                        exportBatchImages();
                     } else if (which == 6) {
-                        showExportFiltersDialog();
+                        showImportFiltersDialog();
                     } else if (which == 7) {
-                        resetAll();
+                        showExportFiltersDialog();
                     } else if (which == 8) {
+                        saveDraft();
+                    } else if (which == 9) {
+                        showDraftsDialog();
+                    } else if (which == 10) {
+                        copyPresetShareCode();
+                    } else if (which == 11) {
+                        showImportShareCodeDialog();
+                    } else if (which == 12) {
+                        resetAll();
+                    } else if (which == 13) {
                         previewZoom = 1f;
                         previewPanX = 0f;
                         previewPanY = 0f;
@@ -727,6 +913,7 @@ public final class MainActivity extends Activity {
             cropOverlayView.invalidate();
             renderPreview();
         });
+        addModeButton(cropRow, "自动水平", false, this::autoStraighten);
         addModeButton(cropRow, "完成", true, this::finishCrop);
         controls.addView(cropRow);
         controls.addView(createSectionLabel("辅助网格"));
@@ -773,9 +960,52 @@ public final class MainActivity extends Activity {
         Toast.makeText(this, "已应用裁剪", Toast.LENGTH_SHORT).show();
     }
 
+    private void autoStraighten() {
+        Bitmap source = fastSourceBitmap != null ? fastSourceBitmap : originalBitmap;
+        if (source == null || source.isRecycled()) {
+            return;
+        }
+        int width = source.getWidth();
+        int height = source.getHeight();
+        float bestScore = 0f;
+        float bestAngle = 0f;
+        int centerY = height / 2;
+        for (int angle = -8; angle <= 8; angle++) {
+            double radians = Math.toRadians(angle);
+            double slope = Math.tan(radians);
+            float score = 0f;
+            int last = -1;
+            for (int x = 8; x < width - 8; x += 8) {
+                int y = Math.max(1, Math.min(height - 2, Math.round(centerY + (float) ((x - width / 2f) * slope))));
+                int color = source.getPixel(x, y);
+                int luminance = Math.round(Color.red(color) * 0.299f + Color.green(color) * 0.587f
+                        + Color.blue(color) * 0.114f);
+                if (last >= 0) {
+                    score += Math.abs(luminance - last);
+                }
+                last = luminance;
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                bestAngle = -angle;
+            }
+        }
+        pushUndoSnapshot("自动水平");
+        geometry.rotateDegrees = clamp(geometry.rotateDegrees + bestAngle, -45f, 45f);
+        renderControls();
+        renderPreview(false);
+        Toast.makeText(this, "已自动水平 " + String.format(Locale.US, "%.1f", bestAngle) + "°",
+                Toast.LENGTH_SHORT).show();
+    }
+
     private void renderFilterPanel() {
         controls.addView(createSectionLabel("预设滤镜"));
         controls.addView(createPresetStrip());
+        controls.addView(createSectionLabel("常用"));
+        addSlider("曝光", adjustments.exposure, -1f, 1f, value -> adjustments.exposure = value);
+        addSlider("对比度", adjustments.contrast, -1f, 1f, value -> adjustments.contrast = value);
+        addSlider("色温", adjustments.temperature, -1f, 1f, value -> adjustments.temperature = value);
+        addSlider("饱和度", adjustments.saturation, -1f, 1f, value -> adjustments.saturation = value);
         if (activeFilterPreset != null) {
             addSlider("滤镜强度", filterStrength, 0f, 1f, value -> {
                 filterStrength = value;
@@ -897,31 +1127,38 @@ public final class MainActivity extends Activity {
         addSlider("褪色", adjustments.fade, 0f, 1f, value -> adjustments.fade = value);
         controls.addView(createSectionLabel("局部调整"));
         LinearLayout localRow = createButtonRow();
-        addModeButton(localRow, adjustments.localEnabled > 0.5f ? "局部开" : "开启局部",
-                adjustments.localEnabled > 0.5f, () -> {
-                    pushUndoSnapshot("局部调整");
-                    adjustments.localEnabled = adjustments.localEnabled > 0.5f ? 0f : 1f;
-                    renderControls();
-                    renderPreview(false);
-                });
+        addModeButton(localRow, "新增局部", false, this::addLocalPoint);
         addModeButton(localRow, "点选中心", localPickMode, this::startLocalPicker);
         controls.addView(localRow);
-        addSlider("局部半径", adjustments.localRadius, 0.12f, 0.8f, value -> {
-            adjustments.localEnabled = 1f;
-            adjustments.localRadius = value;
-        });
-        addSlider("局部羽化", adjustments.localFeather, 0f, 1f, value -> {
-            adjustments.localEnabled = 1f;
-            adjustments.localFeather = value;
-        });
-        addSlider("局部曝光", adjustments.localExposure, -1f, 1f, value -> {
-            adjustments.localEnabled = 1f;
-            adjustments.localExposure = value;
-        });
-        addSlider("局部饱和", adjustments.localSaturation, -1f, 1f, value -> {
-            adjustments.localEnabled = 1f;
-            adjustments.localSaturation = value;
-        });
+        LinearLayout localManageRow = createButtonRow();
+        addModeButton(localManageRow, "上一个", false, () -> switchLocalPoint(-1));
+        addModeButton(localManageRow, localPointCount() + "/3", localPointCount() > 0, () -> {});
+        addModeButton(localManageRow, "下一个", false, () -> switchLocalPoint(1));
+        addModeButton(localManageRow, "删除", false, this::deleteActiveLocalPoint);
+        controls.addView(localManageRow);
+        if (localPointCount() > 0) {
+            int active = activeLocalIndex();
+            addSlider("局部半径", adjustments.localRadii[active], 0.12f, 0.8f, value -> {
+                adjustments.localRadii[activeLocalIndex()] = value;
+                syncActiveLocalFromArrays();
+            });
+            addSlider("局部羽化", adjustments.localFeathers[active], 0f, 1f, value -> {
+                adjustments.localFeathers[activeLocalIndex()] = value;
+                syncActiveLocalFromArrays();
+            });
+            addSlider("局部曝光", adjustments.localExposures[active], -1f, 1f, value -> {
+                adjustments.localExposures[activeLocalIndex()] = value;
+                syncActiveLocalFromArrays();
+            });
+            addSlider("局部饱和", adjustments.localSaturations[active], -1f, 1f, value -> {
+                adjustments.localSaturations[activeLocalIndex()] = value;
+                syncActiveLocalFromArrays();
+            });
+        }
+        controls.addView(createSectionLabel("质感"));
+        addSlider("锐化", adjustments.sharpness, -1f, 1f, value -> adjustments.sharpness = value);
+        addSlider("降噪", adjustments.noiseReduction, 0f, 1f, value -> adjustments.noiseReduction = value);
+        addSlider("颗粒", adjustments.grain, 0f, 1f, value -> adjustments.grain = value);
     }
 
     private View createPresetStrip() {
@@ -973,7 +1210,24 @@ public final class MainActivity extends Activity {
         Button button = createButton(label, selected || isActiveFilter(preset));
         button.setOnClickListener(v -> applyPreset(preset));
         button.setGravity(Gravity.CENTER);
+        Bitmap thumbnail = createPresetThumbnail(preset);
+        BitmapDrawable drawable = new BitmapDrawable(getResources(), thumbnail);
+        drawable.setBounds(0, 0, dp(76), dp(28));
+        button.setCompoundDrawables(null, drawable, null, null);
+        button.setCompoundDrawablePadding(dp(3));
         return button;
+    }
+
+    private Bitmap createPresetThumbnail(Preset preset) {
+        Bitmap source = Bitmap.createScaledBitmap(originalBitmap, dp(76), dp(28), true);
+        ColorAdjustments presetAdjustments = preset.adjustments.copy();
+        CurveSet presetCurves = preset.curves.copy();
+        Bitmap result = ImageProcessor.applyFastPreview(source, new GeometryAdjustments(),
+                presetAdjustments, presetCurves, 76, () -> false);
+        if (source != originalBitmap && !source.isRecycled()) {
+            source.recycle();
+        }
+        return result == null ? Bitmap.createBitmap(dp(76), dp(28), Bitmap.Config.ARGB_8888) : result;
     }
 
     private boolean isActiveFilter(Preset preset) {
@@ -1321,7 +1575,8 @@ public final class MainActivity extends Activity {
         }
         persistCurrentEdit();
         imageView.updateState(previewGeometry(), adjustments, curves, previewDisplayAspect(),
-                clippingWarningEnabled);
+                clippingWarningEnabled, compareSliderMode, compareSplit);
+        updateLocalOverlay();
         updateHistogramAsync();
     }
 
@@ -1441,7 +1696,7 @@ public final class MainActivity extends Activity {
             compareLabel.setVisibility(View.VISIBLE);
         }
         imageView.updateState(previewGeometry(), new ColorAdjustments(), new CurveSet(),
-                previewDisplayAspect(), false);
+                previewDisplayAspect(), false, false, compareSplit);
     }
 
     private void updateHistogramAsync() {
@@ -1589,7 +1844,10 @@ public final class MainActivity extends Activity {
 
     private void openImage() {
         Intent intent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
-        intent.setType("image/*");
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
+                "image/*", "image/x-adobe-dng", "image/dng", "application/octet-stream"
+        });
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         startActivityForResult(intent, REQUEST_OPEN_IMAGE);
     }
@@ -1651,13 +1909,62 @@ public final class MainActivity extends Activity {
     }
 
     private Bitmap decodeBitmap(Uri uri) throws IOException {
+        Bitmap decoded;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            return android.graphics.ImageDecoder.decodeBitmap(
-                    android.graphics.ImageDecoder.createSource(getContentResolver(), uri))
+            decoded = ImageDecoder.decodeBitmap(
+                    ImageDecoder.createSource(getContentResolver(), uri))
+                    .copy(Bitmap.Config.ARGB_8888, false);
+        } else {
+            decoded = MediaStore.Images.Media.getBitmap(getContentResolver(), uri)
                     .copy(Bitmap.Config.ARGB_8888, false);
         }
-        return MediaStore.Images.Media.getBitmap(getContentResolver(), uri)
-                .copy(Bitmap.Config.ARGB_8888, false);
+        return flattenTransparency(applyExifOrientation(uri, decoded));
+    }
+
+    private Bitmap flattenTransparency(Bitmap bitmap) {
+        if (!bitmap.hasAlpha()) {
+            return bitmap;
+        }
+        Bitmap flattened = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(flattened);
+        canvas.drawColor(Color.WHITE);
+        canvas.drawBitmap(bitmap, 0f, 0f, null);
+        if (flattened != bitmap) {
+            bitmap.recycle();
+        }
+        return flattened;
+    }
+
+    private Bitmap applyExifOrientation(Uri uri, Bitmap bitmap) {
+        try (InputStream inputStream = getContentResolver().openInputStream(uri)) {
+            if (inputStream == null) {
+                return bitmap;
+            }
+            ExifInterface exif = new ExifInterface(inputStream);
+            int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL);
+            Matrix matrix = new Matrix();
+            if (orientation == ExifInterface.ORIENTATION_ROTATE_90) {
+                matrix.postRotate(90f);
+            } else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) {
+                matrix.postRotate(180f);
+            } else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) {
+                matrix.postRotate(270f);
+            } else if (orientation == ExifInterface.ORIENTATION_FLIP_HORIZONTAL) {
+                matrix.postScale(-1f, 1f);
+            } else if (orientation == ExifInterface.ORIENTATION_FLIP_VERTICAL) {
+                matrix.postScale(1f, -1f);
+            } else {
+                return bitmap;
+            }
+            Bitmap rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+            if (rotated != bitmap) {
+                bitmap.recycle();
+            }
+            return rotated;
+        } catch (IOException | RuntimeException exception) {
+            return bitmap;
+        }
     }
 
     private Bitmap scaleDown(Bitmap bitmap, int maxSize) {
@@ -1764,7 +2071,8 @@ public final class MainActivity extends Activity {
                     }
                 }
                 markImageReady(outputUri);
-                runOnUiThread(() -> Toast.makeText(this, "已保存到 Pictures/MyLight", Toast.LENGTH_SHORT).show());
+                Uri savedUri = outputUri;
+                runOnUiThread(() -> showExportCompleteDialog(savedUri));
             } catch (IOException | OutOfMemoryError exception) {
                 if (outputUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     markImageReady(outputUri);
@@ -1781,6 +2089,27 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void showExportCompleteDialog(Uri uri) {
+        Toast.makeText(this, "已保存到 Pictures/MyLight", Toast.LENGTH_SHORT).show();
+        new AlertDialog.Builder(this)
+                .setTitle("导出完成")
+                .setItems(new String[] {"查看", "分享", "继续编辑"}, (dialog, which) -> {
+                    if (which == 0) {
+                        Intent intent = new Intent(Intent.ACTION_VIEW);
+                        intent.setDataAndType(uri, "image/jpeg");
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        startActivity(Intent.createChooser(intent, "查看图片"));
+                    } else if (which == 1) {
+                        Intent intent = new Intent(Intent.ACTION_SEND);
+                        intent.setType("image/jpeg");
+                        intent.putExtra(Intent.EXTRA_STREAM, uri);
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        startActivity(Intent.createChooser(intent, "分享图片"));
+                    }
+                })
+                .show();
+    }
+
     private void exportBatchImages() {
         if (batchImageUris.isEmpty()) {
             Toast.makeText(this, "请先在更多操作中批量选择图片", Toast.LENGTH_SHORT).show();
@@ -1793,10 +2122,22 @@ public final class MainActivity extends Activity {
         List<Uri> sources = new ArrayList<>(batchImageUris);
         int quality = exportQuality;
         int maxEdge = exportMaxEdge();
-        Toast.makeText(this, "开始批量导出 " + sources.size() + " 张", Toast.LENGTH_SHORT).show();
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        ProgressDialog progressDialog = new ProgressDialog(this);
+        progressDialog.setTitle("批量导出");
+        progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+        progressDialog.setMax(sources.size());
+        progressDialog.setCancelable(false);
+        progressDialog.setButton(DialogInterface.BUTTON_NEGATIVE, "取消",
+                (dialog, which) -> cancelled.set(true));
+        progressDialog.show();
         renderExecutor.execute(() -> {
             int saved = 0;
-            for (Uri sourceUri : sources) {
+            for (int i = 0; i < sources.size(); i++) {
+                if (cancelled.get()) {
+                    break;
+                }
+                Uri sourceUri = sources.get(i);
                 Bitmap source = null;
                 Bitmap bitmap = null;
                 Uri outputUri = null;
@@ -1827,11 +2168,21 @@ public final class MainActivity extends Activity {
                         source.recycle();
                     }
                 }
+                final int progress = i + 1;
+                final int savedSoFar = saved;
+                runOnUiThread(() -> {
+                    progressDialog.setProgress(progress);
+                    progressDialog.setMessage("已保存 " + savedSoFar + " / " + sources.size());
+                });
             }
             final int savedCount = saved;
-            runOnUiThread(() -> Toast.makeText(this,
-                    "批量导出完成：" + savedCount + "/" + sources.size(),
-                    Toast.LENGTH_LONG).show());
+            runOnUiThread(() -> {
+                progressDialog.dismiss();
+                Toast.makeText(this,
+                        (cancelled.get() ? "批量导出已取消：" : "批量导出完成：")
+                                + savedCount + "/" + sources.size(),
+                        Toast.LENGTH_LONG).show();
+            });
         });
     }
 
@@ -1916,6 +2267,113 @@ public final class MainActivity extends Activity {
             Toast.makeText(this, "已导入滤镜", Toast.LENGTH_SHORT).show();
         } catch (JSONException exception) {
             Toast.makeText(this, "导入失败，请检查 JSON", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void copyPresetShareCode() {
+        try {
+            JSONObject object = new JSONObject();
+            object.put("name", "MyLight Share");
+            object.put("adjustments", adjustmentsToJson(adjustments));
+            object.put("curves", curvesToJson(curves));
+            String code = "MYLIGHT:" + Base64.encodeToString(object.toString().getBytes("UTF-8"),
+                    Base64.NO_WRAP);
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(ClipData.newPlainText("MyLight share code", code));
+            }
+            Toast.makeText(this, "滤镜分享码已复制", Toast.LENGTH_SHORT).show();
+        } catch (Exception exception) {
+            Toast.makeText(this, "分享码生成失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showImportShareCodeDialog() {
+        EditText input = new EditText(this);
+        input.setSingleLine(false);
+        input.setMinLines(3);
+        input.setHint("粘贴 MYLIGHT: 开头的分享码");
+        new AlertDialog.Builder(this)
+                .setTitle("导入分享码")
+                .setView(input)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("导入", (dialog, which) -> importShareCode(input.getText().toString()))
+                .show();
+    }
+
+    private void importShareCode(String code) {
+        try {
+            String clean = code == null ? "" : code.trim();
+            if (clean.startsWith("MYLIGHT:")) {
+                clean = clean.substring("MYLIGHT:".length());
+            }
+            String json = new String(Base64.decode(clean, Base64.DEFAULT), "UTF-8");
+            JSONObject object = new JSONObject(json);
+            pushUndoSnapshot("导入分享码");
+            readAdjustments(object.getJSONObject("adjustments"), adjustments);
+            readCurves(object.getJSONArray("curves"), curves);
+            clearActiveFilter();
+            renderControls();
+            renderPreview(false);
+            Toast.makeText(this, "已应用分享码", Toast.LENGTH_SHORT).show();
+        } catch (Exception exception) {
+            Toast.makeText(this, "分享码无效", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void saveDraft() {
+        try {
+            JSONArray drafts = new JSONArray(preferences.getString(KEY_DRAFTS, "[]"));
+            JSONObject draft = new JSONObject();
+            draft.put("name", new SimpleDateFormat("MM-dd HH:mm", Locale.US).format(new Date()));
+            draft.put("geometry", geometryToJson());
+            draft.put("adjustments", adjustmentsToJson(adjustments));
+            draft.put("curves", curvesToJson(curves));
+            drafts.put(draft);
+            while (drafts.length() > 10) {
+                drafts.remove(0);
+            }
+            preferences.edit().putString(KEY_DRAFTS, drafts.toString()).apply();
+            Toast.makeText(this, "草稿已保存", Toast.LENGTH_SHORT).show();
+        } catch (JSONException exception) {
+            Toast.makeText(this, "草稿保存失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showDraftsDialog() {
+        try {
+            JSONArray drafts = new JSONArray(preferences.getString(KEY_DRAFTS, "[]"));
+            if (drafts.length() == 0) {
+                Toast.makeText(this, "暂无草稿", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String[] items = new String[drafts.length()];
+            for (int i = 0; i < drafts.length(); i++) {
+                items[i] = drafts.getJSONObject(i).optString("name", "草稿 " + (i + 1));
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle("项目草稿")
+                    .setItems(items, (dialog, which) -> loadDraft(which))
+                    .setNegativeButton("关闭", null)
+                    .show();
+        } catch (JSONException exception) {
+            Toast.makeText(this, "草稿读取失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void loadDraft(int index) {
+        try {
+            JSONArray drafts = new JSONArray(preferences.getString(KEY_DRAFTS, "[]"));
+            JSONObject draft = drafts.getJSONObject(index);
+            pushUndoSnapshot("加载草稿");
+            readGeometry(draft.getJSONObject("geometry"));
+            readAdjustments(draft.getJSONObject("adjustments"), adjustments);
+            readCurves(draft.getJSONArray("curves"), curves);
+            clearActiveFilter();
+            renderControls();
+            renderPreview(false);
+        } catch (JSONException exception) {
+            Toast.makeText(this, "草稿加载失败", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -2139,6 +2597,9 @@ public final class MainActivity extends Activity {
         object.put("vignette", source.vignette);
         object.put("dehaze", source.dehaze);
         object.put("ambiance", source.ambiance);
+        object.put("sharpness", source.sharpness);
+        object.put("noiseReduction", source.noiseReduction);
+        object.put("grain", source.grain);
         object.put("localEnabled", source.localEnabled);
         object.put("localX", source.localX);
         object.put("localY", source.localY);
@@ -2146,6 +2607,14 @@ public final class MainActivity extends Activity {
         object.put("localFeather", source.localFeather);
         object.put("localExposure", source.localExposure);
         object.put("localSaturation", source.localSaturation);
+        object.put("localCount", source.localCount);
+        object.put("activeLocalIndex", source.activeLocalIndex);
+        object.put("localXs", floatArrayToJson(source.localXs));
+        object.put("localYs", floatArrayToJson(source.localYs));
+        object.put("localRadii", floatArrayToJson(source.localRadii));
+        object.put("localFeathers", floatArrayToJson(source.localFeathers));
+        object.put("localExposures", floatArrayToJson(source.localExposures));
+        object.put("localSaturations", floatArrayToJson(source.localSaturations));
         object.put("mixHue", floatArrayToJson(source.mixHue));
         object.put("mixSaturation", floatArrayToJson(source.mixSaturation));
         object.put("mixLuminance", floatArrayToJson(source.mixLuminance));
@@ -2165,6 +2634,9 @@ public final class MainActivity extends Activity {
         target.vignette = (float) object.optDouble("vignette", 0.0);
         target.dehaze = (float) object.optDouble("dehaze", 0.0);
         target.ambiance = (float) object.optDouble("ambiance", 0.0);
+        target.sharpness = (float) object.optDouble("sharpness", 0.0);
+        target.noiseReduction = (float) object.optDouble("noiseReduction", 0.0);
+        target.grain = (float) object.optDouble("grain", 0.0);
         target.localEnabled = (float) object.optDouble("localEnabled", 0.0);
         target.localX = (float) object.optDouble("localX", 0.5);
         target.localY = (float) object.optDouble("localY", 0.5);
@@ -2172,6 +2644,24 @@ public final class MainActivity extends Activity {
         target.localFeather = (float) object.optDouble("localFeather", 0.35);
         target.localExposure = (float) object.optDouble("localExposure", 0.0);
         target.localSaturation = (float) object.optDouble("localSaturation", 0.0);
+        target.localCount = Math.max(0, Math.min(ColorAdjustments.MAX_LOCAL_POINTS,
+                object.optInt("localCount", target.localEnabled > 0.5f ? 1 : 0)));
+        target.activeLocalIndex = Math.max(0, Math.min(target.localCount - 1,
+                object.optInt("activeLocalIndex", 0)));
+        readFloatArray(object.optJSONArray("localXs"), target.localXs);
+        readFloatArray(object.optJSONArray("localYs"), target.localYs);
+        readFloatArray(object.optJSONArray("localRadii"), target.localRadii);
+        readFloatArray(object.optJSONArray("localFeathers"), target.localFeathers);
+        readFloatArray(object.optJSONArray("localExposures"), target.localExposures);
+        readFloatArray(object.optJSONArray("localSaturations"), target.localSaturations);
+        if (target.localCount == 1 && object.optJSONArray("localXs") == null) {
+            target.localXs[0] = target.localX;
+            target.localYs[0] = target.localY;
+            target.localRadii[0] = target.localRadius;
+            target.localFeathers[0] = target.localFeather;
+            target.localExposures[0] = target.localExposure;
+            target.localSaturations[0] = target.localSaturation;
+        }
         readFloatArray(object.optJSONArray("mixHue"), target.mixHue);
         readFloatArray(object.optJSONArray("mixSaturation"), target.mixSaturation);
         readFloatArray(object.optJSONArray("mixLuminance"), target.mixLuminance);
@@ -2415,6 +2905,16 @@ public final class MainActivity extends Activity {
         if (histogramView != null) {
             histogramView.setVisibility(activePanel == PANEL_SIZE ? View.GONE : View.VISIBLE);
         }
+        updateLocalOverlay();
+    }
+
+    private void updateLocalOverlay() {
+        if (localOverlayView == null) {
+            return;
+        }
+        boolean visible = activePanel == PANEL_EFFECTS && localPointCount() > 0;
+        localOverlayView.setVisibility(visible ? View.VISIBLE : View.GONE);
+        localOverlayView.invalidate();
     }
 
     private boolean panelHasChanges(int panel) {
@@ -2438,9 +2938,12 @@ public final class MainActivity extends Activity {
         if (panel == PANEL_EFFECTS) {
             return floatChanged(adjustments.vignette) || floatChanged(adjustments.dehaze)
                     || floatChanged(adjustments.ambiance) || floatChanged(adjustments.fade)
-                    || adjustments.localEnabled > 0.5f
+                    || adjustments.localEnabled > 0.5f || adjustments.localCount > 0
                     || floatChanged(adjustments.localExposure)
-                    || floatChanged(adjustments.localSaturation);
+                    || floatChanged(adjustments.localSaturation)
+                    || floatChanged(adjustments.sharpness)
+                    || floatChanged(adjustments.noiseReduction)
+                    || floatChanged(adjustments.grain);
         }
         if (panel == PANEL_LIGHT) {
             return floatChanged(adjustments.exposure)
@@ -2601,6 +3104,9 @@ public final class MainActivity extends Activity {
         target.vignette = source.vignette;
         target.dehaze = source.dehaze;
         target.ambiance = source.ambiance;
+        target.sharpness = source.sharpness;
+        target.noiseReduction = source.noiseReduction;
+        target.grain = source.grain;
         target.localEnabled = source.localEnabled;
         target.localX = source.localX;
         target.localY = source.localY;
@@ -2608,6 +3114,14 @@ public final class MainActivity extends Activity {
         target.localFeather = source.localFeather;
         target.localExposure = source.localExposure;
         target.localSaturation = source.localSaturation;
+        target.localCount = source.localCount;
+        target.activeLocalIndex = source.activeLocalIndex;
+        System.arraycopy(source.localXs, 0, target.localXs, 0, source.localXs.length);
+        System.arraycopy(source.localYs, 0, target.localYs, 0, source.localYs.length);
+        System.arraycopy(source.localRadii, 0, target.localRadii, 0, source.localRadii.length);
+        System.arraycopy(source.localFeathers, 0, target.localFeathers, 0, source.localFeathers.length);
+        System.arraycopy(source.localExposures, 0, target.localExposures, 0, source.localExposures.length);
+        System.arraycopy(source.localSaturations, 0, target.localSaturations, 0, source.localSaturations.length);
         System.arraycopy(source.mixHue, 0, target.mixHue, 0, source.mixHue.length);
         System.arraycopy(source.mixSaturation, 0, target.mixSaturation, 0, source.mixSaturation.length);
         System.arraycopy(source.mixLuminance, 0, target.mixLuminance, 0, source.mixLuminance.length);
@@ -2627,6 +3141,9 @@ public final class MainActivity extends Activity {
         target.vignette = lerp(start.vignette, end.vignette, amount);
         target.dehaze = lerp(start.dehaze, end.dehaze, amount);
         target.ambiance = lerp(start.ambiance, end.ambiance, amount);
+        target.sharpness = lerp(start.sharpness, end.sharpness, amount);
+        target.noiseReduction = lerp(start.noiseReduction, end.noiseReduction, amount);
+        target.grain = lerp(start.grain, end.grain, amount);
         target.localEnabled = end.localEnabled;
         target.localX = lerp(start.localX, end.localX, amount);
         target.localY = lerp(start.localY, end.localY, amount);
@@ -2634,6 +3151,16 @@ public final class MainActivity extends Activity {
         target.localFeather = lerp(start.localFeather, end.localFeather, amount);
         target.localExposure = lerp(start.localExposure, end.localExposure, amount);
         target.localSaturation = lerp(start.localSaturation, end.localSaturation, amount);
+        target.localCount = end.localCount;
+        target.activeLocalIndex = end.activeLocalIndex;
+        for (int i = 0; i < ColorAdjustments.MAX_LOCAL_POINTS; i++) {
+            target.localXs[i] = lerp(start.localXs[i], end.localXs[i], amount);
+            target.localYs[i] = lerp(start.localYs[i], end.localYs[i], amount);
+            target.localRadii[i] = lerp(start.localRadii[i], end.localRadii[i], amount);
+            target.localFeathers[i] = lerp(start.localFeathers[i], end.localFeathers[i], amount);
+            target.localExposures[i] = lerp(start.localExposures[i], end.localExposures[i], amount);
+            target.localSaturations[i] = lerp(start.localSaturations[i], end.localSaturations[i], amount);
+        }
         for (int i = 0; i < ColorAdjustments.MIX_COUNT; i++) {
             target.mixHue[i] = lerp(start.mixHue[i], end.mixHue[i], amount);
             target.mixSaturation[i] = lerp(start.mixSaturation[i], end.mixSaturation[i], amount);
