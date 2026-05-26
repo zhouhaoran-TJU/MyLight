@@ -215,7 +215,7 @@ public final class MainActivity extends Activity {
             root.addView(createImageFrame(), new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
             root.addView(createControlPanel(false), new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(418)));
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(348)));
         }
         messageBar = new TextView(this);
         messageBar.setTextColor(Color.WHITE);
@@ -394,8 +394,8 @@ public final class MainActivity extends Activity {
 
     private int landscapePanelWidth() {
         int widthPixels = getResources().getDisplayMetrics().widthPixels;
-        int target = Math.round(widthPixels * 0.38f);
-        return Math.max(dp(330), Math.min(dp(430), target));
+        int target = Math.round(widthPixels * 0.32f);
+        return Math.max(dp(300), Math.min(dp(380), target));
     }
 
     private View createToolbar() {

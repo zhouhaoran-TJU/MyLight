@@ -28,7 +28,7 @@ input {
 
 .app {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   width: 100%;
   height: 100vh;
   min-height: 0;
@@ -48,7 +48,7 @@ input {
 
 #preview {
   display: block;
-  width: min(100%, 1220px);
+  width: min(100%, 1360px);
   height: auto;
   max-height: calc(100vh - 36px);
   border: 1px solid #2a3444;
@@ -265,14 +265,14 @@ button {
   .stage {
     width: 100vw;
     max-width: 100vw;
-    min-height: 42vh;
+    min-height: 54vh;
     padding: 12px;
   }
 
   #preview {
     width: calc(100vw - 24px);
     max-width: calc(100vw - 24px);
-    max-height: 42vh;
+    max-height: 54vh;
   }
 
   .panel {
