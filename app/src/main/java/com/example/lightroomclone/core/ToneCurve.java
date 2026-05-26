@@ -71,6 +71,15 @@ public final class ToneCurve {
         setPoint(index, getX(index), value);
     }
 
+    public boolean removePoint(int index) {
+        if (index <= 0 || index >= x.size() - 1) {
+            return false;
+        }
+        x.remove(index);
+        y.remove(index);
+        return true;
+    }
+
     public void setPoint(int index, int valueX, int valueY) {
         if (index < 0 || index >= y.size()) {
             throw new IllegalArgumentException("Invalid point index " + index);

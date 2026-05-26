@@ -11,6 +11,11 @@ import android.view.View;
 import com.example.lightroomclone.core.GeometryAdjustments;
 
 final class CropOverlayView extends View {
+    static final int GRID_THIRDS = 0;
+    static final int GRID_GOLDEN = 1;
+    static final int GRID_CENTER = 2;
+    static final int GRID_NONE = 3;
+
     interface Listener {
         void onCropStarted();
 
@@ -39,6 +44,7 @@ final class CropOverlayView extends View {
     private int imageWidth = 1;
     private int imageHeight = 1;
     private int activeHandle = HANDLE_NONE;
+    private int gridMode = GRID_THIRDS;
     private float lastX;
     private float lastY;
 
@@ -66,6 +72,11 @@ final class CropOverlayView extends View {
         invalidate();
     }
 
+    void setGridMode(int gridMode) {
+        this.gridMode = gridMode;
+        invalidate();
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         if (getVisibility() != VISIBLE) {
@@ -77,12 +88,7 @@ final class CropOverlayView extends View {
         canvas.drawRect(imageBounds.left, cropBounds.top, cropBounds.left, cropBounds.bottom, dimPaint);
         canvas.drawRect(cropBounds.right, cropBounds.top, imageBounds.right, cropBounds.bottom, dimPaint);
 
-        for (int i = 1; i <= 2; i++) {
-            float x = cropBounds.left + cropBounds.width() * i / 3f;
-            float y = cropBounds.top + cropBounds.height() * i / 3f;
-            canvas.drawLine(x, cropBounds.top, x, cropBounds.bottom, gridPaint);
-            canvas.drawLine(cropBounds.left, y, cropBounds.right, y, gridPaint);
-        }
+        drawGrid(canvas);
         canvas.drawRect(cropBounds, borderPaint);
         drawHandle(canvas, cropBounds.left, cropBounds.top);
         drawHandle(canvas, cropBounds.right, cropBounds.top);
@@ -92,6 +98,34 @@ final class CropOverlayView extends View {
         drawHandle(canvas, cropBounds.centerX(), cropBounds.bottom);
         drawHandle(canvas, cropBounds.left, cropBounds.centerY());
         drawHandle(canvas, cropBounds.right, cropBounds.centerY());
+    }
+
+    private void drawGrid(Canvas canvas) {
+        if (gridMode == GRID_NONE) {
+            return;
+        }
+        if (gridMode == GRID_CENTER) {
+            canvas.drawLine(cropBounds.centerX(), cropBounds.top, cropBounds.centerX(), cropBounds.bottom, gridPaint);
+            canvas.drawLine(cropBounds.left, cropBounds.centerY(), cropBounds.right, cropBounds.centerY(), gridPaint);
+            return;
+        }
+        if (gridMode == GRID_GOLDEN) {
+            float a = 0.382f;
+            float b = 0.618f;
+            drawGridLine(canvas, a);
+            drawGridLine(canvas, b);
+            return;
+        }
+        for (int i = 1; i <= 2; i++) {
+            drawGridLine(canvas, i / 3f);
+        }
+    }
+
+    private void drawGridLine(Canvas canvas, float ratio) {
+        float x = cropBounds.left + cropBounds.width() * ratio;
+        float y = cropBounds.top + cropBounds.height() * ratio;
+        canvas.drawLine(x, cropBounds.top, x, cropBounds.bottom, gridPaint);
+        canvas.drawLine(cropBounds.left, y, cropBounds.right, y, gridPaint);
     }
 
     @Override

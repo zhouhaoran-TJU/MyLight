@@ -38,6 +38,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.example.lightroomclone.core.ColorAdjustments;
+import com.example.lightroomclone.core.ColorMath;
 import com.example.lightroomclone.core.CurveSet;
 import com.example.lightroomclone.core.GeometryAdjustments;
 import com.example.lightroomclone.core.ToneCurve;
@@ -73,13 +74,17 @@ public final class MainActivity extends Activity {
     private static final String EXPORT_FOLDER = "MyLight";
     private static final int MAX_UNDO_STEPS = 30;
 
-    private static final int PANEL_SIZE = 0;
-    private static final int PANEL_COLOR = 1;
-    private static final int PANEL_CURVE = 2;
-    private static final int PANEL_EFFECTS = 3;
+    private static final int PANEL_FILTER = 0;
+    private static final int PANEL_LIGHT = 1;
+    private static final int PANEL_COLOR = 2;
+    private static final int PANEL_HSL = 3;
+    private static final int PANEL_CURVE = 4;
+    private static final int PANEL_SIZE = 5;
+    private static final int PANEL_EFFECTS = 6;
 
     private final ExecutorService renderExecutor = Executors.newSingleThreadExecutor();
     private final AtomicInteger renderVersion = new AtomicInteger();
+    private final AtomicInteger histogramVersion = new AtomicInteger();
     private final Handler renderHandler = new Handler(Looper.getMainLooper());
     private final GeometryAdjustments geometry = new GeometryAdjustments();
     private final ColorAdjustments adjustments = new ColorAdjustments();
@@ -92,16 +97,20 @@ public final class MainActivity extends Activity {
     private LinearLayout panelTabs;
     private LinearLayout controls;
     private ScrollView controlScroll;
+    private Button undoToolbarButton;
+    private Button redoToolbarButton;
     private Bitmap originalBitmap;
     private Bitmap fastSourceBitmap;
     private Bitmap qualitySourceBitmap;
     private Bitmap previewBitmap;
     private boolean suppressSliderEvents;
-    private int activePanel = PANEL_COLOR;
+    private int activePanel = PANEL_FILTER;
     private int activeCurveChannel = CurveSet.LUMINANCE;
     private int activeMixChannel = ColorAdjustments.MIX_RED;
+    private int cropGridMode = CropOverlayView.GRID_THIRDS;
     private CurveView curveView;
     private CropOverlayView cropOverlayView;
+    private HistogramView histogramView;
     private final Runnable qualityRenderRunnable = () -> renderPreview(false);
     private SharedPreferences preferences;
     private boolean renderInFlight;
@@ -109,6 +118,8 @@ public final class MainActivity extends Activity {
     private boolean queuedInteractive;
     private boolean compareActive;
     private boolean previewCompareArmed;
+    private boolean histogramExpanded;
+    private Uri originalImageUri;
     private Preset activeFilterPreset;
     private ColorAdjustments filterBaseAdjustments;
     private CurveSet filterBaseCurves;
@@ -200,6 +211,7 @@ public final class MainActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         cropOverlayView = new CropOverlayView(this, geometry);
         cropOverlayView.setImageSize(originalBitmap.getWidth(), originalBitmap.getHeight());
+        cropOverlayView.setGridMode(cropGridMode);
         cropOverlayView.setVisibility(View.GONE);
         cropOverlayView.setListener(new CropOverlayView.Listener() {
             @Override
@@ -221,8 +233,27 @@ public final class MainActivity extends Activity {
         });
         imageFrame.addView(cropOverlayView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        histogramView = new HistogramView(this);
+        FrameLayout.LayoutParams histogramParams = new FrameLayout.LayoutParams(dp(148), dp(82),
+                Gravity.TOP | Gravity.RIGHT);
+        histogramParams.setMargins(0, dp(14), dp(14), 0);
+        imageFrame.addView(histogramView, histogramParams);
+        histogramView.setOnClickListener(v -> toggleHistogram());
         imageFrame.setOnTouchListener((view, event) -> handlePreviewTouch(event));
         return imageFrame;
+    }
+
+    private void toggleHistogram() {
+        histogramExpanded = !histogramExpanded;
+        if (histogramView == null) {
+            return;
+        }
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                histogramExpanded ? dp(230) : dp(148),
+                histogramExpanded ? dp(124) : dp(82),
+                Gravity.TOP | Gravity.RIGHT);
+        params.setMargins(0, dp(14), dp(14), 0);
+        histogramView.setLayoutParams(params);
     }
 
     private boolean handlePreviewTouch(MotionEvent event) {
@@ -255,12 +286,15 @@ public final class MainActivity extends Activity {
         setGradientBackground(panel, Color.rgb(16, 20, 28), Color.rgb(11, 14, 20),
                 GradientDrawable.Orientation.TOP_BOTTOM);
         panel.setPadding(landscape ? dp(10) : 0, 0, landscape ? dp(10) : 0, 0);
+        HorizontalScrollView tabScroll = new HorizontalScrollView(this);
+        tabScroll.setHorizontalScrollBarEnabled(false);
         panelTabs = new LinearLayout(this);
         panelTabs.setOrientation(LinearLayout.HORIZONTAL);
         panelTabs.setPadding(dp(12), dp(10), dp(12), dp(10));
         setGradientBackground(panelTabs, Color.rgb(20, 25, 34), Color.rgb(13, 17, 24),
                 GradientDrawable.Orientation.LEFT_RIGHT);
-        panel.addView(panelTabs, new LinearLayout.LayoutParams(
+        tabScroll.addView(panelTabs);
+        panel.addView(tabScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(62)));
         rebuildPanelTabs();
 
@@ -305,19 +339,19 @@ public final class MainActivity extends Activity {
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setOrientation(LinearLayout.HORIZONTAL);
 
-        Button openButton = createButton("相册");
+        Button openButton = createButton("打开");
         openButton.setOnClickListener(v -> openImage());
         addToolbarButton(actions, openButton);
 
-        Button undoButton = createButton("撤销");
-        undoButton.setOnClickListener(v -> undoLastEdit());
-        addToolbarButton(actions, undoButton);
+        undoToolbarButton = createButton("撤销");
+        undoToolbarButton.setOnClickListener(v -> undoLastEdit());
+        addToolbarButton(actions, undoToolbarButton);
 
-        Button redoButton = createButton("重做");
-        redoButton.setOnClickListener(v -> redoLastEdit());
-        addToolbarButton(actions, redoButton);
+        redoToolbarButton = createButton("重做");
+        redoToolbarButton.setOnClickListener(v -> redoLastEdit());
+        addToolbarButton(actions, redoToolbarButton);
 
-        Button compareButton = createButton("对比");
+        Button compareButton = createButton("原图");
         compareButton.setOnTouchListener((view, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 compareActive = true;
@@ -333,30 +367,45 @@ public final class MainActivity extends Activity {
         });
         addToolbarButton(actions, compareButton);
 
-        Button resetButton = createButton("重置");
-        resetButton.setOnClickListener(v -> resetAll());
-        addToolbarButton(actions, resetButton);
-
         Button saveButton = createButton("保存");
         saveButton.setOnClickListener(v -> saveImage(null));
         addToolbarButton(actions, saveButton);
+
+        Button moreButton = createButton("更多");
+        moreButton.setOnClickListener(v -> showMoreActions());
+        addToolbarButton(actions, moreButton);
         actionsScroll.addView(actions);
         toolbar.addView(actionsScroll, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        updateHistoryButtons();
         return toolbar;
     }
 
     private void addToolbarButton(LinearLayout row, Button button) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(70), dp(42));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(58), dp(42));
         params.leftMargin = dp(6);
         row.addView(button, params);
     }
 
+    private void showMoreActions() {
+        new AlertDialog.Builder(this)
+                .setTitle("更多操作")
+                .setItems(new String[] {"重置全部"}, (dialog, which) -> {
+                    if (which == 0) {
+                        resetAll();
+                    }
+                })
+                .show();
+    }
+
     private void rebuildPanelTabs() {
         panelTabs.removeAllViews();
-        addPanelTab("尺寸", PANEL_SIZE);
+        addPanelTab("滤镜", PANEL_FILTER);
+        addPanelTab("光线", PANEL_LIGHT);
         addPanelTab("色彩", PANEL_COLOR);
+        addPanelTab("HSL", PANEL_HSL);
         addPanelTab("曲线", PANEL_CURVE);
+        addPanelTab("尺寸", PANEL_SIZE);
         addPanelTab("效果", PANEL_EFFECTS);
     }
 
@@ -369,7 +418,7 @@ public final class MainActivity extends Activity {
             rebuildPanelTabs();
             renderControls();
         });
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(74), dp(42));
         params.leftMargin = dp(4);
         params.rightMargin = dp(4);
         panelTabs.addView(button, params);
@@ -384,6 +433,12 @@ public final class MainActivity extends Activity {
         curveView = null;
         if (activePanel == PANEL_SIZE) {
             renderSizePanel();
+        } else if (activePanel == PANEL_FILTER) {
+            renderFilterPanel();
+        } else if (activePanel == PANEL_LIGHT) {
+            renderLightPanel();
+        } else if (activePanel == PANEL_HSL) {
+            renderHslPanel();
         } else if (activePanel == PANEL_CURVE) {
             renderCurvePanel();
         } else if (activePanel == PANEL_EFFECTS) {
@@ -424,6 +479,17 @@ public final class MainActivity extends Activity {
         });
         addModeButton(cropRow, "完成", true, this::finishCrop);
         controls.addView(cropRow);
+        controls.addView(createSectionLabel("辅助网格"));
+        LinearLayout gridRow = createButtonRow();
+        addModeButton(gridRow, "三分线", cropGridMode == CropOverlayView.GRID_THIRDS,
+                () -> setCropGridMode(CropOverlayView.GRID_THIRDS));
+        addModeButton(gridRow, "黄金", cropGridMode == CropOverlayView.GRID_GOLDEN,
+                () -> setCropGridMode(CropOverlayView.GRID_GOLDEN));
+        addModeButton(gridRow, "中心", cropGridMode == CropOverlayView.GRID_CENTER,
+                () -> setCropGridMode(CropOverlayView.GRID_CENTER));
+        addModeButton(gridRow, "无", cropGridMode == CropOverlayView.GRID_NONE,
+                () -> setCropGridMode(CropOverlayView.GRID_NONE));
+        controls.addView(gridRow);
         addSlider("裁剪缩放", geometry.cropZoom, 0f, 1f, value -> geometry.cropZoom = value);
         addSlider("任意旋转", geometry.rotateDegrees, -45f, 45f, value -> geometry.rotateDegrees = value);
 
@@ -449,7 +515,7 @@ public final class MainActivity extends Activity {
     }
 
     private void finishCrop() {
-        activePanel = PANEL_COLOR;
+        activePanel = PANEL_FILTER;
         persistCurrentEdit();
         rebuildPanelTabs();
         renderControls();
@@ -457,7 +523,7 @@ public final class MainActivity extends Activity {
         Toast.makeText(this, "已应用裁剪", Toast.LENGTH_SHORT).show();
     }
 
-    private void renderColorPanel() {
+    private void renderFilterPanel() {
         controls.addView(createSectionLabel("预设滤镜"));
         controls.addView(createPresetStrip());
         if (activeFilterPreset != null) {
@@ -466,16 +532,25 @@ public final class MainActivity extends Activity {
                 applyFilterStrength();
             });
         }
-        controls.addView(createSectionLabel("基础色彩"));
+    }
+
+    private void renderLightPanel() {
+        controls.addView(createSectionLabel("光线"));
+        addSlider("曝光", adjustments.exposure, -1f, 1f, value -> adjustments.exposure = value);
         addSlider("明亮度", adjustments.brightness, -1f, 1f, value -> adjustments.brightness = value);
         addSlider("高光", adjustments.highlights, -1f, 1f, value -> adjustments.highlights = value);
         addSlider("阴影", adjustments.shadows, -1f, 1f, value -> adjustments.shadows = value);
         addSlider("对比度", adjustments.contrast, -1f, 1f, value -> adjustments.contrast = value);
+    }
+
+    private void renderColorPanel() {
+        controls.addView(createSectionLabel("基础色彩"));
         addSlider("饱和度", adjustments.saturation, -1f, 1f, value -> adjustments.saturation = value);
         addSlider("色温", adjustments.temperature, -1f, 1f, value -> adjustments.temperature = value);
         addSlider("色调", adjustments.tint, -1f, 1f, value -> adjustments.tint = value);
-        addSlider("曝光", adjustments.exposure, -1f, 1f, value -> adjustments.exposure = value);
+    }
 
+    private void renderHslPanel() {
         controls.addView(createSectionLabel("原色 / HSL"));
         GridLayout row = createButtonGrid(4);
         String[] names = {"红", "橙", "黄", "绿", "青", "蓝", "紫", "洋红"};
@@ -523,17 +598,33 @@ public final class MainActivity extends Activity {
             }
         });
         controls.addView(curveView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(170)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(220)));
 
-        Button resetCurveButton = createButton("重置当前曲线");
-        resetCurveButton.setOnClickListener(v -> {
+        LinearLayout curveActions = createButtonRow();
+        addModeButton(curveActions, "删除锚点", false, () -> {
+            if (curveView == null || !curveView.hasDeletableSelection()) {
+                Toast.makeText(this, "请选择可删除的中间锚点", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            pushUndoSnapshot();
+            if (curveView.deleteSelectedPoint()) {
+                rebuildPanelTabs();
+                renderPreview(false);
+            }
+        });
+        addModeButton(curveActions, "重置当前", false, () -> {
             pushUndoSnapshot();
             curves.reset(activeCurveChannel);
             curveView.invalidate();
             renderPreview();
         });
-        controls.addView(resetCurveButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        addModeButton(curveActions, "重置全部", false, () -> {
+            pushUndoSnapshot();
+            curves.reset();
+            curveView.setCurve(curves.curveFor(activeCurveChannel));
+            renderPreview();
+        });
+        controls.addView(curveActions);
     }
 
     private void renderEffectsPanel() {
@@ -552,23 +643,23 @@ public final class MainActivity extends Activity {
         row.setPadding(0, 0, 0, dp(10));
         Preset lastEdit = loadLastEditPreset();
         if (lastEdit != null) {
-            Button button = createPresetButton("上次修改", true, lastEdit);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(112), dp(42));
+            Button button = createPresetButton("上次修改\n记忆", true, lastEdit);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(112), dp(62));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
-        Button saveFilterButton = createButton("存为滤镜", true);
+        Button saveFilterButton = createButton("存为滤镜\n当前", true);
         saveFilterButton.setOnClickListener(v -> showSaveFilterDialog());
-        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(112), dp(42));
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(112), dp(62));
         saveParams.rightMargin = dp(8);
         row.addView(saveFilterButton, saveParams);
         for (Preset preset : Preset.defaults()) {
-            Button button = createPresetButton(preset.name, false, preset);
+            Button button = createPresetButton(preset.name + "\n默认", false, preset);
             button.setOnLongClickListener(v -> {
                 Toast.makeText(this, "默认滤镜不可管理，可保存为自定义滤镜", Toast.LENGTH_SHORT).show();
                 return true;
             });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(92), dp(42));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(96), dp(62));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
@@ -576,12 +667,12 @@ public final class MainActivity extends Activity {
         for (int i = 0; i < customPresets.size(); i++) {
             final int index = i;
             Preset preset = customPresets.get(i);
-            Button button = createPresetButton(preset.name, false, preset);
+            Button button = createPresetButton(preset.name + "\n自定义", false, preset);
             button.setOnLongClickListener(v -> {
                 showCustomPresetMenu(index, preset.name);
                 return true;
             });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(104), dp(42));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(108), dp(62));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
@@ -592,6 +683,7 @@ public final class MainActivity extends Activity {
     private Button createPresetButton(String label, boolean selected, Preset preset) {
         Button button = createButton(label, selected || isActiveFilter(preset));
         button.setOnClickListener(v -> applyPreset(preset));
+        button.setGravity(Gravity.CENTER);
         return button;
     }
 
@@ -660,22 +752,19 @@ public final class MainActivity extends Activity {
     }
 
     private void addSlider(String label, float initialValue, float min, float max, SliderConsumer consumer) {
-        LinearLayout labelRow = new LinearLayout(this);
-        labelRow.setOrientation(LinearLayout.HORIZONTAL);
-        labelRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView valueLabel = new TextView(this);
-        valueLabel.setTextColor(Color.rgb(232, 237, 244));
-        valueLabel.setTextSize(13f);
-        valueLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        labelRow.addView(valueLabel, new LinearLayout.LayoutParams(
-                0, dp(30), 1f));
+        LinearLayout sliderRow = new LinearLayout(this);
+        sliderRow.setOrientation(LinearLayout.HORIZONTAL);
+        sliderRow.setGravity(Gravity.CENTER_VERTICAL);
+        sliderRow.setPadding(0, dp(4), 0, dp(8));
+
+        TextView nameLabel = new TextView(this);
+        nameLabel.setText(label);
+        nameLabel.setTextColor(floatChanged(initialValue) ? Color.WHITE : Color.rgb(202, 211, 224));
+        nameLabel.setTextSize(13f);
+        nameLabel.setTypeface(Typeface.DEFAULT, floatChanged(initialValue) ? Typeface.BOLD : Typeface.NORMAL);
+        sliderRow.addView(nameLabel, new LinearLayout.LayoutParams(dp(70), dp(42)));
 
         int sliderAccent = sliderAccent(label);
-        Button resetButton = createButton("归零", false, Color.rgb(232, 162, 80));
-        labelRow.addView(resetButton, new LinearLayout.LayoutParams(dp(58), dp(30)));
-        controls.addView(labelRow, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(32)));
-
         SeekBar seekBar = new SeekBar(this);
         seekBar.setMax(200);
         seekBar.setProgressTintList(ColorStateList.valueOf(sliderAccent));
@@ -683,6 +772,18 @@ public final class MainActivity extends Activity {
         seekBar.setProgressBackgroundTintList(ColorStateList.valueOf(blend(Color.rgb(43, 50, 62),
                 sliderAccent, 0.16f)));
         seekBar.setSplitTrack(false);
+        sliderRow.addView(seekBar, new LinearLayout.LayoutParams(0, dp(42), 1f));
+
+        TextView valueLabel = new TextView(this);
+        valueLabel.setTextColor(Color.rgb(232, 237, 244));
+        valueLabel.setTextSize(12f);
+        valueLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        valueLabel.setGravity(Gravity.CENTER);
+        sliderRow.addView(valueLabel, new LinearLayout.LayoutParams(dp(50), dp(42)));
+
+        Button resetButton = createButton("0", false, Color.rgb(232, 162, 80));
+        sliderRow.addView(resetButton, new LinearLayout.LayoutParams(dp(38), dp(34)));
+
         SliderBinding binding = new SliderBinding(seekBar, initialValue, min, max);
         sliderBindings.add(binding);
         setSeekValue(seekBar, initialValue, min, max);
@@ -694,6 +795,8 @@ public final class MainActivity extends Activity {
                 consumer.accept(value);
                 binding.value = value;
                 updateSliderLabel(valueLabel, label, value);
+                nameLabel.setTextColor(floatChanged(value) ? Color.WHITE : Color.rgb(202, 211, 224));
+                nameLabel.setTypeface(Typeface.DEFAULT, floatChanged(value) ? Typeface.BOLD : Typeface.NORMAL);
                 if (!suppressSliderEvents) {
                     if (fromUser) {
                         renderInteractivePreview();
@@ -726,17 +829,17 @@ public final class MainActivity extends Activity {
             setSeekValue(seekBar, resetValue, min, max);
             suppressSliderEvents = false;
             updateSliderLabel(valueLabel, label, resetValue);
+            nameLabel.setTextColor(Color.rgb(202, 211, 224));
+            nameLabel.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
             renderControls();
             renderPreview(false);
         });
-        LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
-        seekParams.bottomMargin = dp(6);
-        controls.addView(seekBar, seekParams);
+        controls.addView(sliderRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(56)));
     }
 
     private void updateSliderLabel(TextView label, String name, float value) {
-        label.setText(name + "  " + String.format(java.util.Locale.US, "%.2f", value));
+        label.setText(String.format(java.util.Locale.US, "%.2f", value));
     }
 
     private void setSeekValue(SeekBar seekBar, float value, float min, float max) {
@@ -753,6 +856,14 @@ public final class MainActivity extends Activity {
         }
         renderControls();
         renderPreview();
+    }
+
+    private void setCropGridMode(int mode) {
+        cropGridMode = mode;
+        if (cropOverlayView != null) {
+            cropOverlayView.setGridMode(mode);
+        }
+        renderControls();
     }
 
     private void applyPreset(Preset preset) {
@@ -809,6 +920,7 @@ public final class MainActivity extends Activity {
         }
         persistCurrentEdit();
         imageView.updateState(previewGeometry(), adjustments, curves, previewDisplayAspect());
+        updateHistogramAsync();
     }
 
     private void renderComparePreview() {
@@ -816,6 +928,69 @@ public final class MainActivity extends Activity {
             return;
         }
         imageView.updateState(previewGeometry(), new ColorAdjustments(), new CurveSet(), previewDisplayAspect());
+    }
+
+    private void updateHistogramAsync() {
+        if (histogramView == null) {
+            return;
+        }
+        Bitmap source = fastSourceBitmap != null ? fastSourceBitmap : originalBitmap;
+        if (source == null || source.isRecycled()) {
+            return;
+        }
+        int version = histogramVersion.incrementAndGet();
+        ColorAdjustments adjustmentSnapshot = adjustments.copy();
+        CurveSet curveSnapshot = curves.copy();
+        renderExecutor.execute(() -> {
+            HistogramData data = buildHistogram(source, adjustmentSnapshot, curveSnapshot, version);
+            if (data == null) {
+                return;
+            }
+            runOnUiThread(() -> {
+                if (version == histogramVersion.get() && histogramView != null) {
+                    histogramView.setHistogram(data.luminance, data.red, data.green, data.blue);
+                }
+            });
+        });
+    }
+
+    private HistogramData buildHistogram(Bitmap source, ColorAdjustments adjustmentSnapshot,
+            CurveSet curveSnapshot, int version) {
+        int width = source.getWidth();
+        int height = source.getHeight();
+        int stride = Math.max(1, Math.max(width, height) / 180);
+        int[] row = new int[width];
+        int[] luminance = new int[256];
+        int[] red = new int[256];
+        int[] green = new int[256];
+        int[] blue = new int[256];
+        int[] luminanceCurve = ColorMath.buildLookup(curveSnapshot.luminance);
+        int[] redCurve = ColorMath.buildLookup(curveSnapshot.red);
+        int[] greenCurve = ColorMath.buildLookup(curveSnapshot.green);
+        int[] blueCurve = ColorMath.buildLookup(curveSnapshot.blue);
+        boolean colorMixEnabled = ColorMath.hasColorMix(adjustmentSnapshot);
+        float[] hsvScratch = new float[3];
+        for (int y = 0; y < height; y += stride) {
+            if (version != histogramVersion.get()) {
+                return null;
+            }
+            source.getPixels(row, 0, width, 0, y, width, 1);
+            float normalizedY = height <= 1 ? 0f : y / (float) (height - 1);
+            for (int x = 0; x < width; x += stride) {
+                float normalizedX = width <= 1 ? 0f : x / (float) (width - 1);
+                int argb = ColorMath.adjustArgb(row[x], adjustmentSnapshot, luminanceCurve,
+                        redCurve, greenCurve, blueCurve, normalizedX, normalizedY,
+                        hsvScratch, colorMixEnabled);
+                int r = (argb >>> 16) & 0xff;
+                int g = (argb >>> 8) & 0xff;
+                int b = argb & 0xff;
+                red[r]++;
+                green[g]++;
+                blue[b]++;
+                luminance[Math.round(r * 0.299f + g * 0.587f + b * 0.114f)]++;
+            }
+        }
+        return new HistogramData(luminance, red, green, blue);
     }
 
     private GeometryAdjustments previewGeometry() {
@@ -923,6 +1098,7 @@ public final class MainActivity extends Activity {
                         originalBitmap.recycle();
                     }
                     originalBitmap = scaled;
+                    originalImageUri = uri;
                     rebuildRenderSources();
                     if (imageView != null) {
                         imageView.setImageBitmap(scaled);
@@ -1023,34 +1199,46 @@ public final class MainActivity extends Activity {
     }
 
     private void saveImage(Uri uri) {
-        Bitmap source = originalBitmap;
-        if (source == null) {
+        if (originalBitmap == null) {
             return;
         }
-        Toast.makeText(this, "正在保存到 Pictures/MyLight", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "正在全分辨率保存到 Pictures/MyLight", Toast.LENGTH_SHORT).show();
         GeometryAdjustments geometrySnapshot = geometry.copy();
         ColorAdjustments adjustmentsSnapshot = adjustments.copy();
         CurveSet curveSnapshot = curves.copy();
+        Uri sourceUri = originalImageUri;
         renderExecutor.execute(() -> {
-            Bitmap bitmap = ImageProcessor.apply(source, geometrySnapshot, adjustmentsSnapshot, curveSnapshot);
-            Uri outputUri = uri == null ? createDefaultImageUri() : uri;
-            if (outputUri == null) {
-                bitmap.recycle();
-                runOnUiThread(() -> Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show());
-                return;
-            }
-            try (OutputStream outputStream = getContentResolver().openOutputStream(outputUri)) {
-                if (outputStream == null || !bitmap.compress(Bitmap.CompressFormat.JPEG, 95, outputStream)) {
+            Bitmap source = null;
+            Bitmap bitmap = null;
+            Uri outputUri = null;
+            try {
+                source = sourceUri == null ? originalBitmap : decodeBitmap(sourceUri);
+                bitmap = ImageProcessor.apply(source, geometrySnapshot, adjustmentsSnapshot, curveSnapshot);
+                outputUri = uri == null ? createDefaultImageUri() : uri;
+                if (outputUri == null) {
                     runOnUiThread(() -> Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show());
-                    bitmap.recycle();
                     return;
                 }
+                try (OutputStream outputStream = getContentResolver().openOutputStream(outputUri)) {
+                    if (outputStream == null || !bitmap.compress(Bitmap.CompressFormat.JPEG, 95, outputStream)) {
+                        runOnUiThread(() -> Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show());
+                        return;
+                    }
+                }
                 markImageReady(outputUri);
-                bitmap.recycle();
                 runOnUiThread(() -> Toast.makeText(this, "已保存到 Pictures/MyLight", Toast.LENGTH_SHORT).show());
-            } catch (IOException exception) {
-                bitmap.recycle();
+            } catch (IOException | OutOfMemoryError exception) {
+                if (outputUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    markImageReady(outputUri);
+                }
                 runOnUiThread(() -> Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show());
+            } finally {
+                if (bitmap != null && !bitmap.isRecycled()) {
+                    bitmap.recycle();
+                }
+                if (source != null && source != originalBitmap && !source.isRecycled()) {
+                    source.recycle();
+                }
             }
         });
     }
@@ -1091,8 +1279,12 @@ public final class MainActivity extends Activity {
     private void showCustomPresetMenu(int index, String currentName) {
         new AlertDialog.Builder(this)
                 .setTitle(currentName)
-                .setItems(new String[] {"重命名", "删除"}, (dialog, which) -> {
+                .setItems(new String[] {"上移", "下移", "重命名", "删除"}, (dialog, which) -> {
                     if (which == 0) {
+                        moveCustomFilter(index, -1);
+                    } else if (which == 1) {
+                        moveCustomFilter(index, 1);
+                    } else if (which == 2) {
                         showRenameFilterDialog(index, currentName);
                     } else {
                         confirmDeleteFilter(index, currentName);
@@ -1158,6 +1350,33 @@ public final class MainActivity extends Activity {
             Toast.makeText(this, "已删除滤镜", Toast.LENGTH_SHORT).show();
         } catch (JSONException exception) {
             Toast.makeText(this, "删除失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void moveCustomFilter(int index, int direction) {
+        try {
+            JSONArray presets = new JSONArray(preferences.getString(KEY_CUSTOM_PRESETS, "[]"));
+            int target = index + direction;
+            if (index < 0 || index >= presets.length() || target < 0 || target >= presets.length()) {
+                Toast.makeText(this, direction < 0 ? "已经在最前" : "已经在最后", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            JSONArray reordered = new JSONArray();
+            for (int i = 0; i < presets.length(); i++) {
+                if (i == index) {
+                    reordered.put(presets.getJSONObject(target));
+                } else if (i == target) {
+                    reordered.put(presets.getJSONObject(index));
+                } else {
+                    reordered.put(presets.getJSONObject(i));
+                }
+            }
+            preferences.edit().putString(KEY_CUSTOM_PRESETS, reordered.toString()).apply();
+            clearActiveFilter();
+            renderControls();
+            Toast.makeText(this, "已调整滤镜顺序", Toast.LENGTH_SHORT).show();
+        } catch (JSONException exception) {
+            Toast.makeText(this, "排序失败", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1506,9 +1725,15 @@ public final class MainActivity extends Activity {
         }
         cropOverlayView.setVisibility(activePanel == PANEL_SIZE ? View.VISIBLE : View.GONE);
         cropOverlayView.invalidate();
+        if (histogramView != null) {
+            histogramView.setVisibility(activePanel == PANEL_SIZE ? View.GONE : View.VISIBLE);
+        }
     }
 
     private boolean panelHasChanges(int panel) {
+        if (panel == PANEL_FILTER) {
+            return activeFilterPreset != null && floatChanged(filterStrength);
+        }
         if (panel == PANEL_SIZE) {
             return geometry.cropMode != GeometryAdjustments.CROP_ORIGINAL
                     || floatChanged(geometry.cropLeft)
@@ -1527,15 +1752,22 @@ public final class MainActivity extends Activity {
             return floatChanged(adjustments.vignette) || floatChanged(adjustments.dehaze)
                     || floatChanged(adjustments.ambiance) || floatChanged(adjustments.fade);
         }
-        return floatChanged(adjustments.brightness)
-                || floatChanged(adjustments.highlights)
-                || floatChanged(adjustments.shadows)
-                || floatChanged(adjustments.contrast)
-                || floatChanged(adjustments.saturation)
-                || floatChanged(adjustments.temperature)
-                || floatChanged(adjustments.tint)
-                || floatChanged(adjustments.exposure)
-                || colorMixChanged();
+        if (panel == PANEL_LIGHT) {
+            return floatChanged(adjustments.exposure)
+                    || floatChanged(adjustments.brightness)
+                    || floatChanged(adjustments.highlights)
+                    || floatChanged(adjustments.shadows)
+                    || floatChanged(adjustments.contrast);
+        }
+        if (panel == PANEL_COLOR) {
+            return floatChanged(adjustments.saturation)
+                    || floatChanged(adjustments.temperature)
+                    || floatChanged(adjustments.tint);
+        }
+        if (panel == PANEL_HSL) {
+            return colorMixChanged();
+        }
+        return false;
     }
 
     private boolean colorMixChanged() {
@@ -1569,6 +1801,7 @@ public final class MainActivity extends Activity {
         while (undoStack.size() > MAX_UNDO_STEPS) {
             undoStack.removeLast();
         }
+        updateHistoryButtons();
     }
 
     private void undoLastEdit() {
@@ -1588,6 +1821,7 @@ public final class MainActivity extends Activity {
         curves = snapshot.curves.copy();
         renderControls();
         renderPreview(false);
+        updateHistoryButtons();
         Toast.makeText(this, "已撤销", Toast.LENGTH_SHORT).show();
     }
 
@@ -1605,7 +1839,21 @@ public final class MainActivity extends Activity {
         curves = snapshot.curves.copy();
         renderControls();
         renderPreview(false);
+        updateHistoryButtons();
         Toast.makeText(this, "已重做", Toast.LENGTH_SHORT).show();
+    }
+
+    private void updateHistoryButtons() {
+        if (undoToolbarButton != null) {
+            boolean enabled = !undoStack.isEmpty();
+            undoToolbarButton.setEnabled(enabled);
+            undoToolbarButton.setAlpha(enabled ? 1f : 0.38f);
+        }
+        if (redoToolbarButton != null) {
+            boolean enabled = !redoStack.isEmpty();
+            redoToolbarButton.setEnabled(enabled);
+            redoToolbarButton.setAlpha(enabled ? 1f : 0.38f);
+        }
     }
 
     private static void copyGeometry(GeometryAdjustments source, GeometryAdjustments target) {
@@ -1703,6 +1951,20 @@ public final class MainActivity extends Activity {
             this.geometry = geometry;
             this.adjustments = adjustments;
             this.curves = curves;
+        }
+    }
+
+    private static final class HistogramData {
+        final int[] luminance;
+        final int[] red;
+        final int[] green;
+        final int[] blue;
+
+        HistogramData(int[] luminance, int[] red, int[] green, int[] blue) {
+            this.luminance = luminance;
+            this.red = red;
+            this.green = green;
+            this.blue = blue;
         }
     }
 

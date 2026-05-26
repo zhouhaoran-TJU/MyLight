@@ -243,13 +243,13 @@ final class ImageProcessor {
     }
 
     private static Bitmap transform(Bitmap source, GeometryAdjustments geometry) {
-        int width = source.getWidth();
-        int height = source.getHeight();
+        RectF crop = cropRect(source, geometry);
+        int width = Math.max(1, Math.round(crop.width()));
+        int height = Math.max(1, Math.round(crop.height()));
         Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(output);
         canvas.drawColor(Color.rgb(8, 9, 12));
 
-        RectF crop = cropRect(source, geometry);
         float scale = Math.max(width / crop.width(), height / crop.height());
         scale *= 1f + geometry.cropZoom * 0.8f;
         float angle = geometry.rotateDegrees + geometry.quarterTurns * 90f;

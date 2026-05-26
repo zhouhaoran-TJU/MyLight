@@ -20,9 +20,11 @@ final class CurveView extends View {
     private final Paint curvePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint activePointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private ToneCurve curve;
     private Listener listener;
     private int activePoint = -1;
+    private int selectedPoint = -1;
 
     CurveView(Context context, ToneCurve curve) {
         super(context);
@@ -39,7 +41,10 @@ final class CurveView extends View {
         pointPaint.setStyle(Paint.Style.FILL);
         activePointPaint.setColor(Color.rgb(95, 179, 243));
         activePointPaint.setStyle(Paint.Style.FILL);
-        setMinimumHeight(dp(170));
+        labelPaint.setColor(Color.rgb(232, 238, 246));
+        labelPaint.setTextSize(dp(12));
+        labelPaint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        setMinimumHeight(dp(220));
     }
 
     void setListener(Listener listener) {
@@ -85,9 +90,13 @@ final class CurveView extends View {
         }
 
         for (int i = 0; i < curve.pointCount(); i++) {
-            Paint paint = i == activePoint ? activePointPaint : pointPaint;
+            Paint paint = i == activePoint || i == selectedPoint ? activePointPaint : pointPaint;
             canvas.drawCircle(toScreenX(curve.getX(i), left, right),
-                    toScreenY(curve.getY(i), top, bottom), dp(i == activePoint ? 8 : 7), paint);
+                    toScreenY(curve.getY(i), top, bottom), dp((i == activePoint || i == selectedPoint) ? 8 : 7), paint);
+        }
+        if (selectedPoint >= 0 && selectedPoint < curve.pointCount()) {
+            String label = curve.getX(selectedPoint) + " / " + curve.getY(selectedPoint);
+            canvas.drawText(label, left + dp(8), top + dp(18), labelPaint);
         }
     }
 
@@ -111,6 +120,7 @@ final class CurveView extends View {
             } else {
                 activePoint = curve.addPoint(valueX, valueY);
             }
+            selectedPoint = activePoint;
             updatePoint(event.getX(), event.getY(), left, top, right, bottom, false);
             return true;
         }
@@ -122,12 +132,26 @@ final class CurveView extends View {
             if (activePoint >= 0) {
                 updatePoint(event.getX(), event.getY(), left, top, right, bottom, true);
             }
-            activePoint = -1;
             getParent().requestDisallowInterceptTouchEvent(false);
             invalidate();
             return true;
         }
         return true;
+    }
+
+    boolean deleteSelectedPoint() {
+        if (selectedPoint <= 0 || selectedPoint >= curve.pointCount() - 1) {
+            return false;
+        }
+        curve.removePoint(selectedPoint);
+        selectedPoint = -1;
+        activePoint = -1;
+        invalidate();
+        return true;
+    }
+
+    boolean hasDeletableSelection() {
+        return selectedPoint > 0 && selectedPoint < curve.pointCount() - 1;
     }
 
     private void updatePoint(float touchX, float touchY, float left, float top, float right, float bottom,
