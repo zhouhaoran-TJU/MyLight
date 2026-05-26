@@ -36,8 +36,9 @@ final class GpuImageView extends GLSurfaceView {
         requestRender();
     }
 
-    void updateState(GeometryAdjustments geometry, ColorAdjustments adjustments, CurveSet curves) {
-        renderer.updateState(geometry, adjustments, curves);
+    void updateState(GeometryAdjustments geometry, ColorAdjustments adjustments, CurveSet curves,
+            float displayAspect) {
+        renderer.updateState(geometry, adjustments, curves, displayAspect);
         requestRender();
     }
 
@@ -67,6 +68,7 @@ final class GpuImageView extends GLSurfaceView {
         private int viewHeight = 1;
         private int imageWidth = 1;
         private int imageHeight = 1;
+        private float displayAspect = 1f;
         private float cropZoom;
         private float rotateDegrees;
         private int quarterTurns;
@@ -88,7 +90,8 @@ final class GpuImageView extends GLSurfaceView {
             }
         }
 
-        void updateState(GeometryAdjustments geometry, ColorAdjustments sourceAdjustments, CurveSet curves) {
+        void updateState(GeometryAdjustments geometry, ColorAdjustments sourceAdjustments, CurveSet curves,
+                float nextDisplayAspect) {
             synchronized (lock) {
                 adjustments[0] = sourceAdjustments.brightness;
                 adjustments[1] = sourceAdjustments.highlights;
@@ -112,6 +115,7 @@ final class GpuImageView extends GLSurfaceView {
                 cropZoom = geometry.cropZoom;
                 rotateDegrees = geometry.rotateDegrees;
                 quarterTurns = geometry.quarterTurns;
+                displayAspect = Math.max(0.1f, nextDisplayAspect);
                 writeCurve(0, ColorMath.buildLookup(curves.luminance));
                 writeCurve(1, ColorMath.buildLookup(curves.red));
                 writeCurve(2, ColorMath.buildLookup(curves.green));
@@ -152,7 +156,7 @@ final class GpuImageView extends GLSurfaceView {
             GLES20.glEnableVertexAttribArray(positionLocation);
             GLES20.glVertexAttribPointer(positionLocation, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
 
-            float[] imageRect = imageRect();
+            float localDisplayAspect;
             float[] localAdjustments;
             float[] localMixHue;
             float[] localMixSaturation;
@@ -170,21 +174,26 @@ final class GpuImageView extends GLSurfaceView {
                 localCropZoom = cropZoom;
                 localRotateDegrees = rotateDegrees;
                 localQuarterTurns = quarterTurns;
+                localDisplayAspect = displayAspect;
                 stateDirty = false;
             }
+            float[] imageRect = imageRect(localDisplayAspect);
             float angle = (float) Math.toRadians(localRotateDegrees + localQuarterTurns * 90f);
             float cover = Math.max(1f, Math.abs((float) Math.cos(angle)) + Math.abs((float) Math.sin(angle)));
             float cropWidth = Math.max(0.01f, localCrop[2] - localCrop[0]);
             float cropHeight = Math.max(0.01f, localCrop[3] - localCrop[1]);
-            float sourceAspect = imageWidth / (float) imageHeight;
-            float scale = Math.max(1f / cropWidth, 1f / cropHeight) * (1f + localCropZoom * 0.8f) * cover;
+            float outputWidth = imageWidth;
+            float outputHeight = outputWidth / Math.max(0.1f, localDisplayAspect);
+            float scale = Math.max(outputWidth / (cropWidth * imageWidth),
+                    outputHeight / (cropHeight * imageHeight));
+            scale *= (1f + localCropZoom * 0.8f) * cover;
 
             GLES20.glUniform4fv(uniform("u_imageRect"), 1, imageRect, 0);
             GLES20.glUniform2f(uniform("u_imageSize"), imageWidth, imageHeight);
+            GLES20.glUniform2f(uniform("u_outputSize"), outputWidth, outputHeight);
             GLES20.glUniform4fv(uniform("u_crop"), 1, localCrop, 0);
             GLES20.glUniform1f(uniform("u_scale"), scale);
             GLES20.glUniform1f(uniform("u_angle"), angle);
-            GLES20.glUniform1f(uniform("u_sourceAspect"), sourceAspect);
             GLES20.glUniform1fv(uniform("u_adjustments"), localAdjustments.length, localAdjustments, 0);
             GLES20.glUniform1fv(uniform("u_mixHue"), localMixHue.length, localMixHue, 0);
             GLES20.glUniform1fv(uniform("u_mixSaturation"), localMixSaturation.length, localMixSaturation, 0);
@@ -228,9 +237,8 @@ final class GpuImageView extends GLSurfaceView {
                     GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer);
         }
 
-        private float[] imageRect() {
+        private float[] imageRect(float imageAspect) {
             float viewAspect = viewWidth / (float) viewHeight;
-            float imageAspect = imageWidth / (float) imageHeight;
             float width = 1f;
             float height = 1f;
             if (viewAspect > imageAspect) {
@@ -322,10 +330,10 @@ final class GpuImageView extends GLSurfaceView {
                     + "uniform sampler2D u_curve;\n"
                     + "uniform vec4 u_imageRect;\n"
                     + "uniform vec2 u_imageSize;\n"
+                    + "uniform vec2 u_outputSize;\n"
                     + "uniform vec4 u_crop;\n"
                     + "uniform float u_scale;\n"
                     + "uniform float u_angle;\n"
-                    + "uniform float u_sourceAspect;\n"
                     + "uniform float u_adjustments[12];\n"
                     + "uniform float u_mixHue[8];\n"
                     + "uniform float u_mixSaturation[8];\n"
@@ -391,8 +399,8 @@ final class GpuImageView extends GLSurfaceView {
                     + "void main() {\n"
                     + "  vec2 local = (v_view - u_imageRect.xy) / u_imageRect.zw;\n"
                     + "  if (local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0) { gl_FragColor = vec4(8.0/255.0, 9.0/255.0, 12.0/255.0, 1.0); return; }\n"
-                    + "  vec2 canvas = local * u_imageSize;\n"
-                    + "  vec2 d = canvas - u_imageSize * 0.5;\n"
+                    + "  vec2 canvas = local * u_outputSize;\n"
+                    + "  vec2 d = canvas - u_outputSize * 0.5;\n"
                     + "  float c = cos(u_angle); float s = sin(u_angle);\n"
                     + "  vec2 srcDelta = vec2(c * d.x + s * d.y, -s * d.x + c * d.y) / u_scale;\n"
                     + "  vec2 cropCenter = vec2((u_crop.x + u_crop.z) * 0.5 * u_imageSize.x, (u_crop.y + u_crop.w) * 0.5 * u_imageSize.y);\n"

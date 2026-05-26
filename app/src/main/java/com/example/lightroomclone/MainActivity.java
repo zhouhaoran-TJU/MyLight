@@ -557,7 +557,7 @@ public final class MainActivity extends Activity {
             return;
         }
         persistCurrentEdit();
-        imageView.updateState(previewGeometry(), adjustments, curves);
+        imageView.updateState(previewGeometry(), adjustments, curves, previewDisplayAspect());
     }
 
     private GeometryAdjustments previewGeometry() {
@@ -567,6 +567,16 @@ public final class MainActivity extends Activity {
             preview.cropZoom = 0f;
         }
         return preview;
+    }
+
+    private float previewDisplayAspect() {
+        float sourceAspect = sourceAspect();
+        if (activePanel == PANEL_SIZE) {
+            return sourceAspect;
+        }
+        float cropWidth = Math.max(0.01f, geometry.cropRight - geometry.cropLeft);
+        float cropHeight = Math.max(0.01f, geometry.cropBottom - geometry.cropTop);
+        return sourceAspect * cropWidth / cropHeight;
     }
 
     private void startRender(int version, boolean interactive) {
@@ -1023,16 +1033,55 @@ public final class MainActivity extends Activity {
         button.setMinWidth(0);
         button.setPadding(dp(8), 0, dp(8), 0);
         GradientDrawable background = new GradientDrawable();
+        int accent = semanticAccent(text);
         if (selected) {
             background.setOrientation(GradientDrawable.Orientation.LEFT_RIGHT);
-            background.setColors(new int[] {Color.rgb(42, 118, 170), Color.rgb(74, 145, 205)});
+            background.setColors(new int[] {blend(Color.rgb(18, 22, 29), accent, 0.55f),
+                    blend(Color.rgb(18, 22, 29), accent, 0.82f)});
         } else {
-            background.setColor(Color.rgb(31, 36, 45));
+            background.setColor(blend(Color.rgb(25, 30, 38), accent, 0.08f));
         }
-        background.setStroke(dp(1), selected ? Color.rgb(132, 207, 255) : Color.rgb(62, 72, 86));
+        background.setStroke(dp(1), selected ? blend(Color.WHITE, accent, 0.58f)
+                : blend(Color.rgb(62, 72, 86), accent, 0.32f));
         background.setCornerRadius(dp(10));
         button.setBackground(background);
         return button;
+    }
+
+    private int semanticAccent(String text) {
+        if (text.contains("保存") || text.contains("完成")) {
+            return Color.rgb(73, 188, 129);
+        }
+        if (text.contains("重置") || text.contains("归零")) {
+            return Color.rgb(232, 162, 80);
+        }
+        if (text.contains("滤镜") || text.contains("上次") || text.contains("Clean")
+                || text.contains("Film") || text.contains("Mono")) {
+            return Color.rgb(142, 128, 255);
+        }
+        if (text.contains("左转") || text.contains("右转") || text.contains("裁剪")
+                || text.contains("尺寸")) {
+            return Color.rgb(84, 197, 210);
+        }
+        if (text.contains("色彩") || text.contains("红") || text.contains("橙") || text.contains("黄")
+                || text.contains("绿") || text.contains("青") || text.contains("蓝") || text.contains("紫")) {
+            return Color.rgb(101, 196, 122);
+        }
+        if (text.contains("曲线")) {
+            return Color.rgb(95, 179, 243);
+        }
+        if (text.contains("效果")) {
+            return Color.rgb(212, 126, 214);
+        }
+        return Color.rgb(95, 179, 243);
+    }
+
+    private int blend(int base, int accent, float amount) {
+        float keep = 1f - amount;
+        return Color.rgb(
+                Math.round(Color.red(base) * keep + Color.red(accent) * amount),
+                Math.round(Color.green(base) * keep + Color.green(accent) * amount),
+                Math.round(Color.blue(base) * keep + Color.blue(accent) * amount));
     }
 
     private int curveColor(int channel) {
