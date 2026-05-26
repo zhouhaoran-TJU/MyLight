@@ -130,7 +130,20 @@ button {
   display: none;
 }
 
-.panel-tabs,
+.panel-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.adjust-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
 .preset-row,
 .mode-row {
   display: flex;
@@ -140,12 +153,14 @@ button {
 }
 
 .panel-tabs button,
+.adjust-tabs button,
 .preset-row button,
 .mode-row button {
-  min-width: 74px;
+  min-width: 0;
 }
 
 .panel-tabs button.active,
+.adjust-tabs button.active,
 .mode-row button.active {
   color: #5fb3f3;
   border-color: #5fb3f3;
@@ -273,7 +288,6 @@ button {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .panel-tabs,
   .preset-row,
   .mode-row {
     display: flex;

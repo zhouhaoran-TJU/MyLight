@@ -15,6 +15,7 @@ const curveColors = ["#5fb3f3", "#ee5b5b", "#65c47a", "#5d91f5"];
 const state = {
   source: null,
   panel: "filter",
+  adjustPanel: "light",
   activeCurve: 0,
   activeMix: 0,
   activeCurvePoint: -1,
@@ -88,17 +89,14 @@ function renderTabs() {
   tabs.replaceChildren();
   [
     ["filter", "滤镜"],
-    ["light", "光线"],
-    ["color", "色彩"],
-    ["hsl", "HSL"],
+    ["adjust", "调节"],
     ["curve", "曲线"],
-    ["size", "尺寸"],
-    ["effects", "效果"],
+    ["size", "裁剪"],
   ].forEach(([key, label]) => {
     const button = createButton(label);
-    button.classList.toggle("active", state.panel === key);
+    button.classList.toggle("active", key === "adjust" ? isAdjustPanel(state.panel) : state.panel === key);
     button.addEventListener("click", () => {
-      state.panel = key;
+      state.panel = key === "adjust" ? state.adjustPanel : key;
       renderTabs();
       renderControls();
     });
@@ -109,6 +107,7 @@ function renderTabs() {
 
 function renderControls() {
   controls.replaceChildren();
+  if (isAdjustPanel(state.panel)) renderAdjustSwitcher();
   if (state.panel === "size") renderSizePanel();
   else if (state.panel === "filter") renderFilterPanel();
   else if (state.panel === "light") renderLightPanel();
@@ -116,6 +115,32 @@ function renderControls() {
   else if (state.panel === "curve") renderCurvePanel();
   else if (state.panel === "effects") renderEffectsPanel();
   else renderColorPanel();
+}
+
+function isAdjustPanel(panel) {
+  return panel === "light" || panel === "color" || panel === "hsl" || panel === "effects";
+}
+
+function renderAdjustSwitcher() {
+  const row = document.createElement("div");
+  row.className = "adjust-tabs";
+  [
+    ["light", "光线"],
+    ["color", "色彩"],
+    ["hsl", "HSL"],
+    ["effects", "效果"],
+  ].forEach(([key, label]) => {
+    const button = createButton(label);
+    button.classList.toggle("active", state.panel === key);
+    button.addEventListener("click", () => {
+      state.panel = key;
+      state.adjustPanel = key;
+      renderTabs();
+      renderControls();
+    });
+    row.appendChild(button);
+  });
+  controls.appendChild(row);
 }
 
 function renderSizePanel() {

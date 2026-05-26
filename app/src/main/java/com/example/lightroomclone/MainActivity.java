@@ -106,6 +106,7 @@ public final class MainActivity extends Activity {
     private Bitmap previewBitmap;
     private boolean suppressSliderEvents;
     private int activePanel = PANEL_FILTER;
+    private int activeAdjustPanel = PANEL_LIGHT;
     private int activeCurveChannel = CurveSet.LUMINANCE;
     private int activeMixChannel = ColorAdjustments.MIX_RED;
     private int cropGridMode = CropOverlayView.GRID_THIRDS;
@@ -369,15 +370,12 @@ public final class MainActivity extends Activity {
         setGradientBackground(panel, Color.rgb(16, 20, 28), Color.rgb(11, 14, 20),
                 GradientDrawable.Orientation.TOP_BOTTOM);
         panel.setPadding(landscape ? dp(10) : 0, 0, landscape ? dp(10) : 0, 0);
-        HorizontalScrollView tabScroll = new HorizontalScrollView(this);
-        tabScroll.setHorizontalScrollBarEnabled(false);
         panelTabs = new LinearLayout(this);
         panelTabs.setOrientation(LinearLayout.HORIZONTAL);
         panelTabs.setPadding(dp(12), dp(10), dp(12), dp(10));
         setGradientBackground(panelTabs, Color.rgb(20, 25, 34), Color.rgb(13, 17, 24),
                 GradientDrawable.Orientation.LEFT_RIGHT);
-        tabScroll.addView(panelTabs);
-        panel.addView(tabScroll, new LinearLayout.LayoutParams(
+        panel.addView(panelTabs, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(62)));
         rebuildPanelTabs();
 
@@ -413,11 +411,9 @@ public final class MainActivity extends Activity {
         title.setTextSize(21f);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        toolbar.addView(title, new LinearLayout.LayoutParams(dp(86),
-                LinearLayout.LayoutParams.MATCH_PARENT));
+        toolbar.addView(title, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.MATCH_PARENT, 1f));
 
-        HorizontalScrollView actionsScroll = new HorizontalScrollView(this);
-        actionsScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -426,46 +422,36 @@ public final class MainActivity extends Activity {
         openButton.setOnClickListener(v -> openImage());
         addToolbarButton(actions, openButton);
 
-        undoToolbarButton = createButton("撤销");
+        undoToolbarButton = createButton("↶");
         undoToolbarButton.setOnClickListener(v -> undoLastEdit());
-        addToolbarButton(actions, undoToolbarButton);
+        addToolbarIconButton(actions, undoToolbarButton);
 
-        redoToolbarButton = createButton("重做");
+        redoToolbarButton = createButton("↷");
         redoToolbarButton.setOnClickListener(v -> redoLastEdit());
-        addToolbarButton(actions, redoToolbarButton);
-
-        Button compareButton = createButton("原图");
-        compareButton.setOnTouchListener((view, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                compareActive = true;
-                renderComparePreview();
-                return true;
-            }
-            if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
-                compareActive = false;
-                renderPreview(false);
-                return true;
-            }
-            return true;
-        });
-        addToolbarButton(actions, compareButton);
+        addToolbarIconButton(actions, redoToolbarButton);
 
         Button saveButton = createButton("保存");
         saveButton.setOnClickListener(v -> saveImage(null));
         addToolbarButton(actions, saveButton);
 
-        Button moreButton = createButton("更多");
+        Button moreButton = createButton("⋯");
         moreButton.setOnClickListener(v -> showMoreActions());
-        addToolbarButton(actions, moreButton);
-        actionsScroll.addView(actions);
-        toolbar.addView(actionsScroll, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        addToolbarIconButton(actions, moreButton);
+        toolbar.addView(actions, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
         updateHistoryButtons();
         return toolbar;
     }
 
     private void addToolbarButton(LinearLayout row, Button button) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(58), dp(42));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(54), dp(42));
+        params.leftMargin = dp(6);
+        row.addView(button, params);
+    }
+
+    private void addToolbarIconButton(LinearLayout row, Button button) {
+        button.setTextSize(18f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(42), dp(42));
         params.leftMargin = dp(6);
         row.addView(button, params);
     }
@@ -473,9 +459,16 @@ public final class MainActivity extends Activity {
     private void showMoreActions() {
         new AlertDialog.Builder(this)
                 .setTitle("更多操作")
-                .setItems(new String[] {"重置全部"}, (dialog, which) -> {
+                .setItems(new String[] {"重置全部", "重置预览缩放", "长按图片可对比原图"}, (dialog, which) -> {
                     if (which == 0) {
                         resetAll();
+                    } else if (which == 1) {
+                        previewZoom = 1f;
+                        previewPanX = 0f;
+                        previewPanY = 0f;
+                        applyPreviewTransform();
+                    } else {
+                        Toast.makeText(this, "按住预览图查看原图，松开恢复当前效果", Toast.LENGTH_SHORT).show();
                     }
                 })
                 .show();
@@ -483,25 +476,29 @@ public final class MainActivity extends Activity {
 
     private void rebuildPanelTabs() {
         panelTabs.removeAllViews();
-        addPanelTab("滤镜", PANEL_FILTER);
-        addPanelTab("光线", PANEL_LIGHT);
-        addPanelTab("色彩", PANEL_COLOR);
-        addPanelTab("HSL", PANEL_HSL);
-        addPanelTab("曲线", PANEL_CURVE);
-        addPanelTab("尺寸", PANEL_SIZE);
-        addPanelTab("效果", PANEL_EFFECTS);
+        addPrimaryPanelTab("滤镜", PANEL_FILTER, activePanel == PANEL_FILTER,
+                panelHasChanges(PANEL_FILTER));
+        addPrimaryPanelTab("调节", activeAdjustPanel, isAdjustPanel(activePanel),
+                adjustPanelsHaveChanges());
+        addPrimaryPanelTab("曲线", PANEL_CURVE, activePanel == PANEL_CURVE,
+                panelHasChanges(PANEL_CURVE));
+        addPrimaryPanelTab("裁剪", PANEL_SIZE, activePanel == PANEL_SIZE,
+                panelHasChanges(PANEL_SIZE));
     }
 
-    private void addPanelTab(String label, int panel) {
-        String displayLabel = panelHasChanges(panel) ? label + " •" : label;
-        Button button = createButton(displayLabel, activePanel == panel);
-        button.setTypeface(Typeface.DEFAULT, activePanel == panel ? Typeface.BOLD : Typeface.NORMAL);
+    private void addPrimaryPanelTab(String label, int panel, boolean selected, boolean changed) {
+        String displayLabel = changed ? label + " •" : label;
+        Button button = createButton(displayLabel, selected);
+        button.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
         button.setOnClickListener(v -> {
             activePanel = panel;
+            if (isAdjustPanel(panel)) {
+                activeAdjustPanel = panel;
+            }
             rebuildPanelTabs();
             renderControls();
         });
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(74), dp(42));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1f);
         params.leftMargin = dp(4);
         params.rightMargin = dp(4);
         panelTabs.addView(button, params);
@@ -514,6 +511,10 @@ public final class MainActivity extends Activity {
         controls.removeAllViews();
         sliderBindings.clear();
         curveView = null;
+        if (isAdjustPanel(activePanel)) {
+            activeAdjustPanel = activePanel;
+            renderAdjustSwitcher();
+        }
         if (activePanel == PANEL_SIZE) {
             renderSizePanel();
         } else if (activePanel == PANEL_FILTER) {
@@ -530,6 +531,25 @@ public final class MainActivity extends Activity {
             renderColorPanel();
         }
         updateCropOverlay();
+    }
+
+    private void renderAdjustSwitcher() {
+        GridLayout grid = createButtonGrid(4);
+        addAdjustButton(grid, "光线", PANEL_LIGHT);
+        addAdjustButton(grid, "色彩", PANEL_COLOR);
+        addAdjustButton(grid, "HSL", PANEL_HSL);
+        addAdjustButton(grid, "效果", PANEL_EFFECTS);
+        controls.addView(grid);
+    }
+
+    private void addAdjustButton(GridLayout grid, String label, int panel) {
+        String displayLabel = panelHasChanges(panel) ? label + " •" : label;
+        addColorModeButton(grid, displayLabel, semanticAccent(label), activePanel == panel, () -> {
+            activePanel = panel;
+            activeAdjustPanel = panel;
+            rebuildPanelTabs();
+            renderControls();
+        });
     }
 
     private void renderSizePanel() {
@@ -1867,6 +1887,15 @@ public final class MainActivity extends Activity {
             return colorMixChanged();
         }
         return false;
+    }
+
+    private boolean isAdjustPanel(int panel) {
+        return panel == PANEL_LIGHT || panel == PANEL_COLOR || panel == PANEL_HSL || panel == PANEL_EFFECTS;
+    }
+
+    private boolean adjustPanelsHaveChanges() {
+        return panelHasChanges(PANEL_LIGHT) || panelHasChanges(PANEL_COLOR)
+                || panelHasChanges(PANEL_HSL) || panelHasChanges(PANEL_EFFECTS);
     }
 
     private boolean colorMixChanged() {
