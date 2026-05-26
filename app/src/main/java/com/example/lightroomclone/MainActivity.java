@@ -2,7 +2,10 @@ package com.example.lightroomclone;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -67,6 +70,7 @@ import org.json.JSONObject;
 public final class MainActivity extends Activity {
     private static final int REQUEST_OPEN_IMAGE = 10;
     private static final int REQUEST_SAVE_IMAGE = 11;
+    private static final int REQUEST_OPEN_BATCH = 12;
     private static final int MAX_PREVIEW_SIZE = 1400;
     private static final int RENDER_FAST_MAX_EDGE = 540;
     private static final int RENDER_QUALITY_MAX_EDGE = 960;
@@ -74,6 +78,8 @@ public final class MainActivity extends Activity {
     private static final String PREFS_NAME = "tonelab_memory";
     private static final String KEY_CUSTOM_PRESETS = "custom_presets";
     private static final String KEY_LAST_EDIT = "last_edit";
+    private static final String KEY_EXPORT_QUALITY = "export_quality";
+    private static final String KEY_EXPORT_SIZE = "export_size";
     private static final String EXPORT_FOLDER = "MyLight";
     private static final int MAX_UNDO_STEPS = 30;
 
@@ -93,6 +99,8 @@ public final class MainActivity extends Activity {
     private final ColorAdjustments adjustments = new ColorAdjustments();
     private final Deque<EditSnapshot> undoStack = new ArrayDeque<>();
     private final Deque<EditSnapshot> redoStack = new ArrayDeque<>();
+    private final List<String> undoLabels = new ArrayList<>();
+    private final List<Uri> batchImageUris = new ArrayList<>();
     private CurveSet curves = new CurveSet();
     private final List<SliderBinding> sliderBindings = new ArrayList<>();
 
@@ -124,6 +132,11 @@ public final class MainActivity extends Activity {
     private boolean queuedInteractive;
     private boolean compareActive;
     private boolean previewCompareArmed;
+    private boolean clippingWarningEnabled;
+    private boolean whiteBalancePickMode;
+    private boolean localPickMode;
+    private int exportQuality = 95;
+    private int exportSizeMode;
     private boolean histogramExpanded;
     private Uri originalImageUri;
     private ScaleGestureDetector previewScaleDetector;
@@ -147,6 +160,8 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        exportQuality = preferences.getInt(KEY_EXPORT_QUALITY, 95);
+        exportSizeMode = preferences.getInt(KEY_EXPORT_SIZE, 0);
         previewScaleDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override
             public boolean onScale(ScaleGestureDetector detector) {
@@ -182,11 +197,13 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+        if (resultCode != RESULT_OK || data == null) {
             return;
         }
         Uri uri = data.getData();
-        if (requestCode == REQUEST_OPEN_IMAGE) {
+        if (requestCode == REQUEST_OPEN_BATCH) {
+            collectBatchUris(data);
+        } else if (requestCode == REQUEST_OPEN_IMAGE && uri != null) {
             loadImage(uri);
         } else if (requestCode == REQUEST_SAVE_IMAGE) {
             saveImage(uri);
@@ -300,6 +317,14 @@ public final class MainActivity extends Activity {
     }
 
     private boolean handlePreviewTouch(MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN && whiteBalancePickMode) {
+            applyWhiteBalanceFromTap(event.getX(), event.getY());
+            return true;
+        }
+        if (event.getAction() == MotionEvent.ACTION_DOWN && localPickMode) {
+            applyLocalCenterFromTap(event.getX(), event.getY());
+            return true;
+        }
         if (activePanel == PANEL_SIZE) {
             return false;
         }
@@ -364,6 +389,100 @@ public final class MainActivity extends Activity {
         imageView.setScaleY(previewZoom);
         imageView.setTranslationX(previewPanX);
         imageView.setTranslationY(previewPanY);
+    }
+
+    private void startWhiteBalancePicker() {
+        whiteBalancePickMode = true;
+        localPickMode = false;
+        renderControls();
+        Toast.makeText(this, "点一下图片中的灰白区域", Toast.LENGTH_SHORT).show();
+    }
+
+    private void startLocalPicker() {
+        localPickMode = true;
+        whiteBalancePickMode = false;
+        adjustments.localEnabled = 1f;
+        renderControls();
+        Toast.makeText(this, "点一下图片设置局部调整中心", Toast.LENGTH_SHORT).show();
+    }
+
+    private void applyWhiteBalanceFromTap(float x, float y) {
+        if (originalBitmap == null || imageView == null) {
+            return;
+        }
+        float nx = clamp(x / Math.max(1f, imageView.getWidth()), 0f, 1f);
+        float ny = clamp(y / Math.max(1f, imageView.getHeight()), 0f, 1f);
+        int px = Math.max(0, Math.min(originalBitmap.getWidth() - 1,
+                Math.round(nx * (originalBitmap.getWidth() - 1))));
+        int py = Math.max(0, Math.min(originalBitmap.getHeight() - 1,
+                Math.round(ny * (originalBitmap.getHeight() - 1))));
+        int color = originalBitmap.getPixel(px, py);
+        float r = Color.red(color) / 255f;
+        float g = Color.green(color) / 255f;
+        float b = Color.blue(color) / 255f;
+        pushUndoSnapshot("白平衡吸管");
+        adjustments.temperature = clamp(adjustments.temperature + (b - r) * 1.35f, -1f, 1f);
+        adjustments.tint = clamp(adjustments.tint + ((r + b) * 0.5f - g) * 1.25f, -1f, 1f);
+        whiteBalancePickMode = false;
+        renderControls();
+        renderPreview(false);
+        Toast.makeText(this, "已校正白平衡", Toast.LENGTH_SHORT).show();
+    }
+
+    private void applyLocalCenterFromTap(float x, float y) {
+        if (imageView == null) {
+            return;
+        }
+        pushUndoSnapshot("局部中心");
+        adjustments.localEnabled = 1f;
+        adjustments.localX = clamp(x / Math.max(1f, imageView.getWidth()), 0f, 1f);
+        adjustments.localY = clamp(y / Math.max(1f, imageView.getHeight()), 0f, 1f);
+        localPickMode = false;
+        renderControls();
+        renderPreview(false);
+        Toast.makeText(this, "已设置局部中心", Toast.LENGTH_SHORT).show();
+    }
+
+    private void autoEnhance() {
+        Bitmap source = fastSourceBitmap != null ? fastSourceBitmap : originalBitmap;
+        if (source == null || source.isRecycled()) {
+            return;
+        }
+        long luminanceSum = 0L;
+        float saturationSum = 0f;
+        int samples = 0;
+        float[] hsv = new float[3];
+        int stepX = Math.max(1, source.getWidth() / 48);
+        int stepY = Math.max(1, source.getHeight() / 48);
+        for (int y = 0; y < source.getHeight(); y += stepY) {
+            for (int x = 0; x < source.getWidth(); x += stepX) {
+                int color = source.getPixel(x, y);
+                int r = Color.red(color);
+                int g = Color.green(color);
+                int b = Color.blue(color);
+                luminanceSum += Math.round(r * 0.299f + g * 0.587f + b * 0.114f);
+                Color.colorToHSV(color, hsv);
+                saturationSum += hsv[1];
+                samples++;
+            }
+        }
+        if (samples == 0) {
+            return;
+        }
+        float averageLuminance = luminanceSum / (255f * samples);
+        float averageSaturation = saturationSum / samples;
+        pushUndoSnapshot("一键优化");
+        adjustments.exposure = clamp(adjustments.exposure + (0.5f - averageLuminance) * 0.85f, -1f, 1f);
+        adjustments.contrast = clamp(adjustments.contrast + 0.12f, -1f, 1f);
+        adjustments.highlights = clamp(adjustments.highlights - Math.max(0f, averageLuminance - 0.58f) * 0.55f,
+                -1f, 1f);
+        adjustments.shadows = clamp(adjustments.shadows + Math.max(0f, 0.45f - averageLuminance) * 0.55f,
+                -1f, 1f);
+        adjustments.saturation = clamp(adjustments.saturation + (0.42f - averageSaturation) * 0.35f,
+                -1f, 1f);
+        renderControls();
+        renderPreview(false);
+        Toast.makeText(this, "已自动优化", Toast.LENGTH_SHORT).show();
     }
 
     private View createControlPanel(boolean landscape) {
@@ -461,10 +580,36 @@ public final class MainActivity extends Activity {
     private void showMoreActions() {
         new AlertDialog.Builder(this)
                 .setTitle("更多操作")
-                .setItems(new String[] {"重置全部", "重置预览缩放", "长按图片可对比原图"}, (dialog, which) -> {
+                .setItems(new String[] {
+                        "历史记录",
+                        "导出设置",
+                        clippingWarningEnabled ? "关闭裁切警告" : "开启裁切警告",
+                        "批量选择图片",
+                        "批量导出当前效果",
+                        "导入滤镜",
+                        "导出滤镜",
+                        "重置全部",
+                        "重置预览缩放",
+                        "长按图片可对比原图"
+                }, (dialog, which) -> {
                     if (which == 0) {
-                        resetAll();
+                        showHistoryDialog();
                     } else if (which == 1) {
+                        showExportSettingsDialog();
+                    } else if (which == 2) {
+                        clippingWarningEnabled = !clippingWarningEnabled;
+                        renderPreview(false);
+                    } else if (which == 3) {
+                        openBatchImages();
+                    } else if (which == 4) {
+                        exportBatchImages();
+                    } else if (which == 5) {
+                        showImportFiltersDialog();
+                    } else if (which == 6) {
+                        showExportFiltersDialog();
+                    } else if (which == 7) {
+                        resetAll();
+                    } else if (which == 8) {
                         previewZoom = 1f;
                         previewPanX = 0f;
                         previewPanY = 0f;
@@ -641,6 +786,10 @@ public final class MainActivity extends Activity {
 
     private void renderLightPanel() {
         controls.addView(createSectionLabel("光线"));
+        LinearLayout actionRow = createButtonRow();
+        addModeButton(actionRow, "一键优化", false, this::autoEnhance);
+        addModeButton(actionRow, "历史记录", false, this::showHistoryDialog);
+        controls.addView(actionRow);
         addSlider("曝光", adjustments.exposure, -1f, 1f, value -> adjustments.exposure = value);
         addSlider("明亮度", adjustments.brightness, -1f, 1f, value -> adjustments.brightness = value);
         addSlider("高光", adjustments.highlights, -1f, 1f, value -> adjustments.highlights = value);
@@ -650,6 +799,14 @@ public final class MainActivity extends Activity {
 
     private void renderColorPanel() {
         controls.addView(createSectionLabel("基础色彩"));
+        LinearLayout actionRow = createButtonRow();
+        addModeButton(actionRow, "白平衡吸管", whiteBalancePickMode, this::startWhiteBalancePicker);
+        addModeButton(actionRow, clippingWarningEnabled ? "裁切警告开" : "裁切警告", clippingWarningEnabled, () -> {
+            clippingWarningEnabled = !clippingWarningEnabled;
+            renderControls();
+            renderPreview(false);
+        });
+        controls.addView(actionRow);
         addSlider("饱和度", adjustments.saturation, -1f, 1f, value -> adjustments.saturation = value);
         addSlider("色温", adjustments.temperature, -1f, 1f, value -> adjustments.temperature = value);
         addSlider("色调", adjustments.tint, -1f, 1f, value -> adjustments.tint = value);
@@ -738,6 +895,33 @@ public final class MainActivity extends Activity {
         addSlider("去模糊", adjustments.dehaze, -1f, 1f, value -> adjustments.dehaze = value);
         addSlider("氛围", adjustments.ambiance, -1f, 1f, value -> adjustments.ambiance = value);
         addSlider("褪色", adjustments.fade, 0f, 1f, value -> adjustments.fade = value);
+        controls.addView(createSectionLabel("局部调整"));
+        LinearLayout localRow = createButtonRow();
+        addModeButton(localRow, adjustments.localEnabled > 0.5f ? "局部开" : "开启局部",
+                adjustments.localEnabled > 0.5f, () -> {
+                    pushUndoSnapshot("局部调整");
+                    adjustments.localEnabled = adjustments.localEnabled > 0.5f ? 0f : 1f;
+                    renderControls();
+                    renderPreview(false);
+                });
+        addModeButton(localRow, "点选中心", localPickMode, this::startLocalPicker);
+        controls.addView(localRow);
+        addSlider("局部半径", adjustments.localRadius, 0.12f, 0.8f, value -> {
+            adjustments.localEnabled = 1f;
+            adjustments.localRadius = value;
+        });
+        addSlider("局部羽化", adjustments.localFeather, 0f, 1f, value -> {
+            adjustments.localEnabled = 1f;
+            adjustments.localFeather = value;
+        });
+        addSlider("局部曝光", adjustments.localExposure, -1f, 1f, value -> {
+            adjustments.localEnabled = 1f;
+            adjustments.localExposure = value;
+        });
+        addSlider("局部饱和", adjustments.localSaturation, -1f, 1f, value -> {
+            adjustments.localEnabled = 1f;
+            adjustments.localSaturation = value;
+        });
     }
 
     private View createPresetStrip() {
@@ -1136,8 +1320,117 @@ public final class MainActivity extends Activity {
             compareLabel.setVisibility(View.GONE);
         }
         persistCurrentEdit();
-        imageView.updateState(previewGeometry(), adjustments, curves, previewDisplayAspect());
+        imageView.updateState(previewGeometry(), adjustments, curves, previewDisplayAspect(),
+                clippingWarningEnabled);
         updateHistogramAsync();
+    }
+
+    private void showHistoryDialog() {
+        if (undoStack.isEmpty()) {
+            Toast.makeText(this, "暂无历史记录", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] items = new String[undoStack.size()];
+        for (int i = 0; i < items.length; i++) {
+            String label = i < undoLabels.size() ? undoLabels.get(i) : "参数调整";
+            items[i] = "回到 " + (items.length - i) + " 步前 · " + label;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("历史记录")
+                .setItems(items, (dialog, which) -> restoreHistorySnapshot(which))
+                .setNegativeButton("关闭", null)
+                .show();
+    }
+
+    private void restoreHistorySnapshot(int index) {
+        List<EditSnapshot> snapshots = new ArrayList<>(undoStack);
+        if (index < 0 || index >= snapshots.size()) {
+            return;
+        }
+        redoStack.push(new EditSnapshot(geometry.copy(), adjustments.copy(), curves.copy()));
+        EditSnapshot snapshot = snapshots.get(index);
+        copyGeometry(snapshot.geometry, geometry);
+        copyAdjustments(snapshot.adjustments, adjustments);
+        curves = snapshot.curves.copy();
+        for (int i = 0; i <= index && !undoStack.isEmpty(); i++) {
+            undoStack.pop();
+            if (!undoLabels.isEmpty()) {
+                undoLabels.remove(0);
+            }
+        }
+        clearActiveFilter();
+        renderControls();
+        renderPreview(false);
+        updateHistoryButtons();
+    }
+
+    private void showExportSettingsDialog() {
+        String[] sizeLabels = {"原图尺寸", "长边 2400", "长边 1600", "长边 1080"};
+        String[] qualityLabels = {"质量 100", "质量 95", "质量 90", "质量 80"};
+        int[] qualityValues = {100, 95, 90, 80};
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(18), dp(8), dp(18), 0);
+        TextView sizeLabel = createSectionLabel("导出尺寸");
+        layout.addView(sizeLabel);
+        final int[] nextSize = {exportSizeMode};
+        for (int i = 0; i < sizeLabels.length; i++) {
+            final int index = i;
+            Button button = createButton(sizeLabels[i], exportSizeMode == i);
+            button.setOnClickListener(v -> {
+                nextSize[0] = index;
+                showExportSettingsDialog();
+            });
+            button.setTag(index);
+            layout.addView(button, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        }
+        layout.addView(createSectionLabel("JPEG 质量"));
+        final int[] nextQuality = {exportQuality};
+        for (int i = 0; i < qualityLabels.length; i++) {
+            final int value = qualityValues[i];
+            Button button = createButton(qualityLabels[i], exportQuality == value);
+            button.setOnClickListener(v -> {
+                nextQuality[0] = value;
+                exportQuality = value;
+                preferences.edit().putInt(KEY_EXPORT_QUALITY, exportQuality).apply();
+                Toast.makeText(this, "导出质量已设为 " + value, Toast.LENGTH_SHORT).show();
+            });
+            layout.addView(button, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("导出设置")
+                .setSingleChoiceItems(sizeLabels, exportSizeMode, (dialog, which) -> nextSize[0] = which)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    exportSizeMode = nextSize[0];
+                    preferences.edit()
+                            .putInt(KEY_EXPORT_SIZE, exportSizeMode)
+                            .putInt(KEY_EXPORT_QUALITY, exportQuality)
+                            .apply();
+                    Toast.makeText(this, "导出设置已保存", Toast.LENGTH_SHORT).show();
+                })
+                .setNeutralButton("质量", (dialog, which) -> showExportQualityDialog(qualityLabels, qualityValues))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showExportQualityDialog(String[] labels, int[] values) {
+        int checked = 1;
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == exportQuality) {
+                checked = i;
+                break;
+            }
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("JPEG 质量")
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    exportQuality = values[which];
+                    preferences.edit().putInt(KEY_EXPORT_QUALITY, exportQuality).apply();
+                    dialog.dismiss();
+                })
+                .show();
     }
 
     private void renderComparePreview() {
@@ -1147,7 +1440,8 @@ public final class MainActivity extends Activity {
         if (compareLabel != null) {
             compareLabel.setVisibility(View.VISIBLE);
         }
-        imageView.updateState(previewGeometry(), new ColorAdjustments(), new CurveSet(), previewDisplayAspect());
+        imageView.updateState(previewGeometry(), new ColorAdjustments(), new CurveSet(),
+                previewDisplayAspect(), false);
     }
 
     private void updateHistogramAsync() {
@@ -1305,6 +1599,37 @@ public final class MainActivity extends Activity {
         startActivityForResult(intent, REQUEST_OPEN_IMAGE);
     }
 
+    private void openBatchImages() {
+        Intent intent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
+            intent.setType("image/*");
+            intent.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, Math.min(20, MediaStore.getPickImagesMaxLimit()));
+        } else {
+            intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("image/*");
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+        }
+        startActivityForResult(intent, REQUEST_OPEN_BATCH);
+    }
+
+    private void collectBatchUris(Intent data) {
+        batchImageUris.clear();
+        ClipData clipData = data.getClipData();
+        if (clipData != null) {
+            for (int i = 0; i < clipData.getItemCount(); i++) {
+                Uri uri = clipData.getItemAt(i).getUri();
+                if (uri != null) {
+                    batchImageUris.add(uri);
+                }
+            }
+        } else if (data.getData() != null) {
+            batchImageUris.add(data.getData());
+        }
+        Toast.makeText(this, "已选择 " + batchImageUris.size() + " 张图片", Toast.LENGTH_SHORT).show();
+    }
+
     private void loadImage(Uri uri) {
         renderExecutor.execute(() -> {
             try {
@@ -1328,6 +1653,7 @@ public final class MainActivity extends Activity {
                     }
                     undoStack.clear();
                     redoStack.clear();
+                    undoLabels.clear();
                     resetAllInternal();
                 });
             } catch (IOException exception) {
@@ -1422,25 +1748,29 @@ public final class MainActivity extends Activity {
         if (originalBitmap == null) {
             return;
         }
-        Toast.makeText(this, "正在全分辨率保存到 Pictures/MyLight", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "正在保存到 Pictures/MyLight", Toast.LENGTH_SHORT).show();
         GeometryAdjustments geometrySnapshot = geometry.copy();
         ColorAdjustments adjustmentsSnapshot = adjustments.copy();
         CurveSet curveSnapshot = curves.copy();
         Uri sourceUri = originalImageUri;
+        int quality = exportQuality;
+        int maxEdge = exportMaxEdge();
         renderExecutor.execute(() -> {
             Bitmap source = null;
             Bitmap bitmap = null;
             Uri outputUri = null;
             try {
                 source = sourceUri == null ? originalBitmap : decodeBitmap(sourceUri);
-                bitmap = ImageProcessor.apply(source, geometrySnapshot, adjustmentsSnapshot, curveSnapshot);
+                bitmap = ImageProcessor.apply(source, geometrySnapshot, adjustmentsSnapshot,
+                        curveSnapshot, maxEdge);
                 outputUri = uri == null ? createDefaultImageUri() : uri;
                 if (outputUri == null) {
                     runOnUiThread(() -> Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show());
                     return;
                 }
                 try (OutputStream outputStream = getContentResolver().openOutputStream(outputUri)) {
-                    if (outputStream == null || !bitmap.compress(Bitmap.CompressFormat.JPEG, 95, outputStream)) {
+                    if (outputStream == null || !bitmap.compress(Bitmap.CompressFormat.JPEG,
+                            quality, outputStream)) {
                         runOnUiThread(() -> Toast.makeText(this, "保存失败", Toast.LENGTH_SHORT).show());
                         return;
                     }
@@ -1463,6 +1793,75 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void exportBatchImages() {
+        if (batchImageUris.isEmpty()) {
+            Toast.makeText(this, "请先在更多操作中批量选择图片", Toast.LENGTH_SHORT).show();
+            openBatchImages();
+            return;
+        }
+        GeometryAdjustments geometrySnapshot = geometry.copy();
+        ColorAdjustments adjustmentsSnapshot = adjustments.copy();
+        CurveSet curveSnapshot = curves.copy();
+        List<Uri> sources = new ArrayList<>(batchImageUris);
+        int quality = exportQuality;
+        int maxEdge = exportMaxEdge();
+        Toast.makeText(this, "开始批量导出 " + sources.size() + " 张", Toast.LENGTH_SHORT).show();
+        renderExecutor.execute(() -> {
+            int saved = 0;
+            for (Uri sourceUri : sources) {
+                Bitmap source = null;
+                Bitmap bitmap = null;
+                Uri outputUri = null;
+                try {
+                    source = decodeBitmap(sourceUri);
+                    bitmap = ImageProcessor.apply(source, geometrySnapshot, adjustmentsSnapshot,
+                            curveSnapshot, maxEdge);
+                    outputUri = createDefaultImageUri();
+                    if (outputUri == null || bitmap == null) {
+                        continue;
+                    }
+                    try (OutputStream outputStream = getContentResolver().openOutputStream(outputUri)) {
+                        if (outputStream != null && bitmap.compress(Bitmap.CompressFormat.JPEG,
+                                quality, outputStream)) {
+                            saved++;
+                        }
+                    }
+                    markImageReady(outputUri);
+                } catch (IOException | OutOfMemoryError ignored) {
+                    if (outputUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        markImageReady(outputUri);
+                    }
+                } finally {
+                    if (bitmap != null && !bitmap.isRecycled()) {
+                        bitmap.recycle();
+                    }
+                    if (source != null && !source.isRecycled()) {
+                        source.recycle();
+                    }
+                }
+            }
+            final int savedCount = saved;
+            runOnUiThread(() -> Toast.makeText(this,
+                    "批量导出完成：" + savedCount + "/" + sources.size(),
+                    Toast.LENGTH_LONG).show());
+        });
+    }
+
+    private int exportMaxEdge() {
+        if (exportSizeMode == 1) {
+            return 2400;
+        }
+        if (exportSizeMode == 2) {
+            return 1600;
+        }
+        if (exportSizeMode == 3) {
+            return 1080;
+        }
+        return originalImageUri == null && originalBitmap != null
+                ? Math.max(originalBitmap.getWidth(), originalBitmap.getHeight())
+                : 10000;
+    }
+
     private void showSaveFilterDialog() {
         EditText input = new EditText(this);
         input.setSingleLine(true);
@@ -1474,6 +1873,62 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("取消", null)
                 .setPositiveButton("保存", (dialog, which) -> saveCurrentFilter(input.getText().toString()))
                 .show();
+    }
+
+    private void showExportFiltersDialog() {
+        String json = preferences.getString(KEY_CUSTOM_PRESETS, "[]");
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard != null) {
+            clipboard.setPrimaryClip(ClipData.newPlainText("MyLight filters", json));
+        }
+        TextView text = new TextView(this);
+        text.setText(json);
+        text.setTextIsSelectable(true);
+        text.setPadding(dp(18), dp(12), dp(18), dp(12));
+        text.setTextColor(Color.rgb(226, 232, 240));
+        new AlertDialog.Builder(this)
+                .setTitle("导出滤镜")
+                .setMessage("自定义滤镜 JSON 已复制到剪贴板，可发给其他人导入。")
+                .setView(text)
+                .setPositiveButton("完成", null)
+                .show();
+    }
+
+    private void showImportFiltersDialog() {
+        EditText input = new EditText(this);
+        input.setMinLines(4);
+        input.setGravity(Gravity.TOP | Gravity.LEFT);
+        input.setHint("粘贴从 MyLight 导出的滤镜 JSON");
+        new AlertDialog.Builder(this)
+                .setTitle("导入滤镜")
+                .setView(input)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("导入", (dialog, which) ->
+                        importFilters(input.getText().toString()))
+                .show();
+    }
+
+    private void importFilters(String rawJson) {
+        try {
+            JSONArray incoming = new JSONArray(rawJson == null ? "" : rawJson.trim());
+            JSONArray current = new JSONArray(preferences.getString(KEY_CUSTOM_PRESETS, "[]"));
+            for (int i = 0; i < incoming.length(); i++) {
+                JSONObject item = incoming.getJSONObject(i);
+                if (!item.has("adjustments") || !item.has("curves")) {
+                    continue;
+                }
+                JSONObject copy = new JSONObject(item.toString());
+                if (copy.optString("name", "").trim().isEmpty()) {
+                    copy.put("name", "导入滤镜 " + (current.length() + 1));
+                }
+                current.put(copy);
+            }
+            preferences.edit().putString(KEY_CUSTOM_PRESETS, current.toString()).apply();
+            renderControls();
+            Toast.makeText(this, "已导入滤镜", Toast.LENGTH_SHORT).show();
+        } catch (JSONException exception) {
+            Toast.makeText(this, "导入失败，请检查 JSON", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void saveCurrentFilter(String rawName) {
@@ -1696,6 +2151,13 @@ public final class MainActivity extends Activity {
         object.put("vignette", source.vignette);
         object.put("dehaze", source.dehaze);
         object.put("ambiance", source.ambiance);
+        object.put("localEnabled", source.localEnabled);
+        object.put("localX", source.localX);
+        object.put("localY", source.localY);
+        object.put("localRadius", source.localRadius);
+        object.put("localFeather", source.localFeather);
+        object.put("localExposure", source.localExposure);
+        object.put("localSaturation", source.localSaturation);
         object.put("mixHue", floatArrayToJson(source.mixHue));
         object.put("mixSaturation", floatArrayToJson(source.mixSaturation));
         object.put("mixLuminance", floatArrayToJson(source.mixLuminance));
@@ -1715,6 +2177,13 @@ public final class MainActivity extends Activity {
         target.vignette = (float) object.optDouble("vignette", 0.0);
         target.dehaze = (float) object.optDouble("dehaze", 0.0);
         target.ambiance = (float) object.optDouble("ambiance", 0.0);
+        target.localEnabled = (float) object.optDouble("localEnabled", 0.0);
+        target.localX = (float) object.optDouble("localX", 0.5);
+        target.localY = (float) object.optDouble("localY", 0.5);
+        target.localRadius = (float) object.optDouble("localRadius", 0.35);
+        target.localFeather = (float) object.optDouble("localFeather", 0.35);
+        target.localExposure = (float) object.optDouble("localExposure", 0.0);
+        target.localSaturation = (float) object.optDouble("localSaturation", 0.0);
         readFloatArray(object.optJSONArray("mixHue"), target.mixHue);
         readFloatArray(object.optJSONArray("mixSaturation"), target.mixSaturation);
         readFloatArray(object.optJSONArray("mixLuminance"), target.mixLuminance);
@@ -1980,7 +2449,10 @@ public final class MainActivity extends Activity {
         }
         if (panel == PANEL_EFFECTS) {
             return floatChanged(adjustments.vignette) || floatChanged(adjustments.dehaze)
-                    || floatChanged(adjustments.ambiance) || floatChanged(adjustments.fade);
+                    || floatChanged(adjustments.ambiance) || floatChanged(adjustments.fade)
+                    || adjustments.localEnabled > 0.5f
+                    || floatChanged(adjustments.localExposure)
+                    || floatChanged(adjustments.localSaturation);
         }
         if (panel == PANEL_LIGHT) {
             return floatChanged(adjustments.exposure)
@@ -2029,16 +2501,28 @@ public final class MainActivity extends Activity {
     }
 
     private void pushUndoSnapshot() {
-        pushUndoSnapshot(true);
+        pushUndoSnapshot("参数调整", true);
+    }
+
+    private void pushUndoSnapshot(String label) {
+        pushUndoSnapshot(label, true);
     }
 
     private void pushUndoSnapshot(boolean clearRedo) {
+        pushUndoSnapshot("参数调整", clearRedo);
+    }
+
+    private void pushUndoSnapshot(String label, boolean clearRedo) {
         undoStack.push(new EditSnapshot(geometry.copy(), adjustments.copy(), curves.copy()));
+        undoLabels.add(0, label == null || label.trim().isEmpty() ? "参数调整" : label.trim());
         if (clearRedo) {
             redoStack.clear();
         }
         while (undoStack.size() > MAX_UNDO_STEPS) {
             undoStack.removeLast();
+            if (!undoLabels.isEmpty()) {
+                undoLabels.remove(undoLabels.size() - 1);
+            }
         }
         updateHistoryButtons();
     }
@@ -2049,6 +2533,9 @@ public final class MainActivity extends Activity {
             return;
         }
         EditSnapshot snapshot = undoStack.pop();
+        if (!undoLabels.isEmpty()) {
+            undoLabels.remove(0);
+        }
         redoStack.push(new EditSnapshot(geometry.copy(), adjustments.copy(), curves.copy()));
         while (redoStack.size() > MAX_UNDO_STEPS) {
             redoStack.removeLast();
@@ -2070,7 +2557,7 @@ public final class MainActivity extends Activity {
             return;
         }
         EditSnapshot snapshot = redoStack.pop();
-        pushUndoSnapshot(false);
+        pushUndoSnapshot("重做前状态", false);
         compareActive = false;
         clearActiveFilter();
         copyGeometry(snapshot.geometry, geometry);
@@ -2126,6 +2613,13 @@ public final class MainActivity extends Activity {
         target.vignette = source.vignette;
         target.dehaze = source.dehaze;
         target.ambiance = source.ambiance;
+        target.localEnabled = source.localEnabled;
+        target.localX = source.localX;
+        target.localY = source.localY;
+        target.localRadius = source.localRadius;
+        target.localFeather = source.localFeather;
+        target.localExposure = source.localExposure;
+        target.localSaturation = source.localSaturation;
         System.arraycopy(source.mixHue, 0, target.mixHue, 0, source.mixHue.length);
         System.arraycopy(source.mixSaturation, 0, target.mixSaturation, 0, source.mixSaturation.length);
         System.arraycopy(source.mixLuminance, 0, target.mixLuminance, 0, source.mixLuminance.length);
@@ -2145,6 +2639,13 @@ public final class MainActivity extends Activity {
         target.vignette = lerp(start.vignette, end.vignette, amount);
         target.dehaze = lerp(start.dehaze, end.dehaze, amount);
         target.ambiance = lerp(start.ambiance, end.ambiance, amount);
+        target.localEnabled = end.localEnabled;
+        target.localX = lerp(start.localX, end.localX, amount);
+        target.localY = lerp(start.localY, end.localY, amount);
+        target.localRadius = lerp(start.localRadius, end.localRadius, amount);
+        target.localFeather = lerp(start.localFeather, end.localFeather, amount);
+        target.localExposure = lerp(start.localExposure, end.localExposure, amount);
+        target.localSaturation = lerp(start.localSaturation, end.localSaturation, amount);
         for (int i = 0; i < ColorAdjustments.MIX_COUNT; i++) {
             target.mixHue[i] = lerp(start.mixHue[i], end.mixHue[i], amount);
             target.mixSaturation[i] = lerp(start.mixSaturation[i], end.mixSaturation[i], amount);

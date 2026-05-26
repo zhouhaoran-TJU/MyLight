@@ -37,8 +37,8 @@ final class GpuImageView extends GLSurfaceView {
     }
 
     void updateState(GeometryAdjustments geometry, ColorAdjustments adjustments, CurveSet curves,
-            float displayAspect) {
-        renderer.updateState(geometry, adjustments, curves, displayAspect);
+            float displayAspect, boolean clippingWarning) {
+        renderer.updateState(geometry, adjustments, curves, displayAspect, clippingWarning);
         requestRender();
     }
 
@@ -53,7 +53,7 @@ final class GpuImageView extends GLSurfaceView {
         private final FloatBuffer vertexBuffer = ByteBuffer.allocateDirect(VERTICES.length * 4)
                 .order(ByteOrder.nativeOrder()).asFloatBuffer();
         private final Object lock = new Object();
-        private final float[] adjustments = new float[12];
+        private final float[] adjustments = new float[19];
         private final float[] mixHue = new float[ColorAdjustments.MIX_COUNT];
         private final float[] mixSaturation = new float[ColorAdjustments.MIX_COUNT];
         private final float[] mixLuminance = new float[ColorAdjustments.MIX_COUNT];
@@ -73,6 +73,7 @@ final class GpuImageView extends GLSurfaceView {
         private float rotateDegrees;
         private int quarterTurns;
         private boolean colorMixEnabled;
+        private boolean clippingWarning;
         private boolean curveDirty = true;
         private boolean stateDirty = true;
 
@@ -92,7 +93,7 @@ final class GpuImageView extends GLSurfaceView {
         }
 
         void updateState(GeometryAdjustments geometry, ColorAdjustments sourceAdjustments, CurveSet curves,
-                float nextDisplayAspect) {
+                float nextDisplayAspect, boolean nextClippingWarning) {
             synchronized (lock) {
                 adjustments[0] = sourceAdjustments.brightness;
                 adjustments[1] = sourceAdjustments.highlights;
@@ -106,6 +107,13 @@ final class GpuImageView extends GLSurfaceView {
                 adjustments[9] = sourceAdjustments.vignette;
                 adjustments[10] = sourceAdjustments.dehaze;
                 adjustments[11] = sourceAdjustments.ambiance;
+                adjustments[12] = sourceAdjustments.localEnabled;
+                adjustments[13] = sourceAdjustments.localX;
+                adjustments[14] = sourceAdjustments.localY;
+                adjustments[15] = sourceAdjustments.localRadius;
+                adjustments[16] = sourceAdjustments.localFeather;
+                adjustments[17] = sourceAdjustments.localExposure;
+                adjustments[18] = sourceAdjustments.localSaturation;
                 System.arraycopy(sourceAdjustments.mixHue, 0, mixHue, 0, mixHue.length);
                 System.arraycopy(sourceAdjustments.mixSaturation, 0, mixSaturation, 0, mixSaturation.length);
                 System.arraycopy(sourceAdjustments.mixLuminance, 0, mixLuminance, 0, mixLuminance.length);
@@ -117,6 +125,7 @@ final class GpuImageView extends GLSurfaceView {
                 cropZoom = geometry.cropZoom;
                 rotateDegrees = geometry.rotateDegrees;
                 quarterTurns = geometry.quarterTurns;
+                clippingWarning = nextClippingWarning;
                 displayAspect = Math.max(0.1f, nextDisplayAspect);
                 writeCurve(0, ColorMath.buildLookup(curves.luminance));
                 writeCurve(1, ColorMath.buildLookup(curves.red));
@@ -168,6 +177,7 @@ final class GpuImageView extends GLSurfaceView {
             float localRotateDegrees;
             int localQuarterTurns;
             boolean localColorMixEnabled;
+            boolean localClippingWarning;
             synchronized (lock) {
                 localAdjustments = adjustments.clone();
                 localMixHue = mixHue.clone();
@@ -179,6 +189,7 @@ final class GpuImageView extends GLSurfaceView {
                 localQuarterTurns = quarterTurns;
                 localDisplayAspect = displayAspect;
                 localColorMixEnabled = colorMixEnabled;
+                localClippingWarning = clippingWarning;
                 stateDirty = false;
             }
             float[] imageRect = imageRect(localDisplayAspect);
@@ -203,6 +214,7 @@ final class GpuImageView extends GLSurfaceView {
             GLES20.glUniform1fv(uniform("u_mixSaturation"), localMixSaturation.length, localMixSaturation, 0);
             GLES20.glUniform1fv(uniform("u_mixLuminance"), localMixLuminance.length, localMixLuminance, 0);
             GLES20.glUniform1f(uniform("u_mixEnabled"), localColorMixEnabled ? 1f : 0f);
+            GLES20.glUniform1f(uniform("u_clippingWarning"), localClippingWarning ? 1f : 0f);
 
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, imageTexture);
@@ -339,11 +351,12 @@ final class GpuImageView extends GLSurfaceView {
                     + "uniform vec4 u_crop;\n"
                     + "uniform float u_scale;\n"
                     + "uniform float u_angle;\n"
-                    + "uniform float u_adjustments[12];\n"
+                    + "uniform float u_adjustments[19];\n"
                     + "uniform float u_mixHue[8];\n"
                     + "uniform float u_mixSaturation[8];\n"
                     + "uniform float u_mixLuminance[8];\n"
                     + "uniform float u_mixEnabled;\n"
+                    + "uniform float u_clippingWarning;\n"
                     + "float centerAt(int i) {\n"
                     + "  if (i == 0) return 0.0; if (i == 1) return 30.0; if (i == 2) return 60.0; if (i == 3) return 120.0;\n"
                     + "  if (i == 4) return 180.0; if (i == 5) return 230.0; if (i == 6) return 275.0; return 315.0;\n"
@@ -382,6 +395,8 @@ final class GpuImageView extends GLSurfaceView {
                     + "  float brightness = u_adjustments[0]; float highlights = u_adjustments[1]; float shadows = u_adjustments[2]; float contrast = u_adjustments[3];\n"
                     + "  float saturation = u_adjustments[4]; float temperature = u_adjustments[5]; float tint = u_adjustments[6]; float exposure = u_adjustments[7];\n"
                     + "  float fade = u_adjustments[8]; float vignette = u_adjustments[9]; float dehaze = u_adjustments[10]; float ambiance = u_adjustments[11];\n"
+                    + "  float localEnabled = u_adjustments[12]; vec2 localCenter = vec2(u_adjustments[13], u_adjustments[14]); float localRadius = u_adjustments[15];\n"
+                    + "  float localFeather = u_adjustments[16]; float localExposure = u_adjustments[17]; float localSaturation = u_adjustments[18];\n"
                     + "  rgb = rgb * pow(2.0, exposure) + brightness * 0.35;\n"
                     + "  float l = dot(rgb, vec3(0.299, 0.587, 0.114));\n"
                     + "  float hm = smoothstep(0.45, 1.0, l); float sm = 1.0 - smoothstep(0.0, 0.55, l);\n"
@@ -399,6 +414,14 @@ final class GpuImageView extends GLSurfaceView {
                     + "  if (fade > 0.0) rgb = rgb * (1.0 - fade * 0.35) + vec3(0.06 * fade);\n"
                     + "  float edge = smoothstep(0.18, 0.72, distance(p, vec2(0.5)));\n"
                     + "  rgb *= 1.0 - vignette * 0.65 * edge;\n"
+                    + "  if (localEnabled > 0.5) {\n"
+                    + "    float inner = max(0.01, localRadius * (1.0 - localFeather));\n"
+                    + "    float mask = 1.0 - smoothstep(inner, max(inner + 0.01, localRadius), distance(p, localCenter));\n"
+                    + "    rgb *= pow(2.0, localExposure * mask);\n"
+                    + "    float ll = dot(rgb, vec3(0.299, 0.587, 0.114));\n"
+                    + "    float lss = localSaturation >= 0.0 ? 1.0 + localSaturation * 1.5 * mask : 1.0 + localSaturation * mask;\n"
+                    + "    rgb = vec3(ll) + (rgb - vec3(ll)) * lss;\n"
+                    + "  }\n"
                     + "  rgb.r = curve(curve(rgb.r, 1.0), 0.0); rgb.g = curve(curve(rgb.g, 2.0), 0.0); rgb.b = curve(curve(rgb.b, 3.0), 0.0);\n"
                     + "  return clamp(rgb, 0.0, 1.0);\n"
                     + "}\n"
@@ -413,6 +436,13 @@ final class GpuImageView extends GLSurfaceView {
                     + "  vec2 uv = (cropCenter + srcDelta) / u_imageSize;\n"
                     + "  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { gl_FragColor = vec4(8.0/255.0, 9.0/255.0, 12.0/255.0, 1.0); return; }\n"
                     + "  vec4 color = texture2D(u_image, vec2(uv.x, 1.0 - uv.y));\n"
-                    + "  gl_FragColor = vec4(adjust(color.rgb, local), color.a);\n"
+                    + "  vec3 adjusted = adjust(color.rgb, local);\n"
+                    + "  if (u_clippingWarning > 0.5) {\n"
+                    + "    float highClip = step(0.985, max(max(adjusted.r, adjusted.g), adjusted.b));\n"
+                    + "    float lowClip = step(max(max(adjusted.r, adjusted.g), adjusted.b), 0.015);\n"
+                    + "    adjusted = mix(adjusted, vec3(1.0, 0.08, 0.02), highClip * 0.72);\n"
+                    + "    adjusted = mix(adjusted, vec3(0.05, 0.25, 1.0), lowClip * 0.72);\n"
+                    + "  }\n"
+                    + "  gl_FragColor = vec4(adjusted, color.a);\n"
                     + "}\n";
 }

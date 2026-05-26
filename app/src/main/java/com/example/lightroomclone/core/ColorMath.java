@@ -115,6 +115,27 @@ public final class ColorMath {
             b *= vignetteScale;
         }
 
+        if (adjustments.localEnabled > 0.5f) {
+            float dx = normalizedX - adjustments.localX;
+            float dy = normalizedY - adjustments.localY;
+            float distance = (float) Math.sqrt(dx * dx + dy * dy);
+            float inner = Math.max(0.01f, adjustments.localRadius * (1f - adjustments.localFeather));
+            float mask = 1f - smoothstep(inner, Math.max(inner + 0.01f, adjustments.localRadius), distance);
+            if (mask > 0f) {
+                float localExposureScale = (float) Math.pow(2f, adjustments.localExposure * mask);
+                r *= localExposureScale;
+                g *= localExposureScale;
+                b *= localExposureScale;
+                float localLuminance = r * 0.299f + g * 0.587f + b * 0.114f;
+                float localSaturationScale = adjustments.localSaturation >= 0f
+                        ? 1f + adjustments.localSaturation * 1.5f * mask
+                        : 1f + adjustments.localSaturation * mask;
+                r = localLuminance + (r - localLuminance) * localSaturationScale;
+                g = localLuminance + (g - localLuminance) * localSaturationScale;
+                b = localLuminance + (b - localLuminance) * localSaturationScale;
+            }
+        }
+
         int ri = redCurve[toChannel(r)];
         int gi = greenCurve[toChannel(g)];
         int bi = blueCurve[toChannel(b)];

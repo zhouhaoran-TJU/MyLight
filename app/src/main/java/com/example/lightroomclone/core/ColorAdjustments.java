@@ -23,6 +23,13 @@ public final class ColorAdjustments {
     public float vignette;
     public float dehaze;
     public float ambiance;
+    public float localEnabled;
+    public float localX = 0.5f;
+    public float localY = 0.5f;
+    public float localRadius = 0.35f;
+    public float localFeather = 0.35f;
+    public float localExposure;
+    public float localSaturation;
     public final float[] mixHue = new float[MIX_COUNT];
     public final float[] mixSaturation = new float[MIX_COUNT];
     public final float[] mixLuminance = new float[MIX_COUNT];
@@ -41,6 +48,13 @@ public final class ColorAdjustments {
         copy.vignette = vignette;
         copy.dehaze = dehaze;
         copy.ambiance = ambiance;
+        copy.localEnabled = localEnabled;
+        copy.localX = localX;
+        copy.localY = localY;
+        copy.localRadius = localRadius;
+        copy.localFeather = localFeather;
+        copy.localExposure = localExposure;
+        copy.localSaturation = localSaturation;
         System.arraycopy(mixHue, 0, copy.mixHue, 0, mixHue.length);
         System.arraycopy(mixSaturation, 0, copy.mixSaturation, 0, mixSaturation.length);
         System.arraycopy(mixLuminance, 0, copy.mixLuminance, 0, mixLuminance.length);
@@ -60,6 +74,13 @@ public final class ColorAdjustments {
         vignette = 0f;
         dehaze = 0f;
         ambiance = 0f;
+        localEnabled = 0f;
+        localX = 0.5f;
+        localY = 0.5f;
+        localRadius = 0.35f;
+        localFeather = 0.35f;
+        localExposure = 0f;
+        localSaturation = 0f;
         for (int i = 0; i < MIX_COUNT; i++) {
             mixHue[i] = 0f;
             mixSaturation[i] = 0f;
