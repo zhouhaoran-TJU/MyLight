@@ -1,0 +1,17 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.example.lightroomclone"
+    compileSdk 33
+    buildToolsVersion "33.0.2"
+
+    defaultConfig {
+        applicationId "com.example.lightroomclone"
+        minSdk 26
+        targetSdk 33
+        versionCode 1
+        versionName "1.0"
+    }
+}

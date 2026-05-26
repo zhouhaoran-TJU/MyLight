@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ToneLab Web Debug</title>
+  <link rel="stylesheet" href="styles.css?v=20260526-2">
+</head>
+<body>
+  <main class="app">
+    <section class="stage">
+      <canvas id="preview" width="1400" height="980" aria-label="图片预览"></canvas>
+      <canvas id="cropOverlay" hidden aria-label="裁剪框"></canvas>
+    </section>
+
+    <aside class="panel">
+      <header class="topbar">
+        <div>
+          <h1>ToneLab</h1>
+          <p>Web Debug</p>
+        </div>
+        <label class="file-button">
+          <input id="fileInput" type="file" accept="image/*">
+          打开图片
+        </label>
+      </header>
+
+      <nav id="panelTabs" class="panel-tabs" aria-label="功能分区"></nav>
+      <section id="dynamicControls"></section>
+
+      <footer class="footer">
+        <button id="resetAll" type="button">重置全部</button>
+        <button id="download" type="button">下载预览</button>
+      </footer>
+    </aside>
+  </main>
+
+  <script src="app.js?v=20260526-2"></script>
+</body>
+</html>
