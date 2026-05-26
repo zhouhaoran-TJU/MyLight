@@ -23,6 +23,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -45,7 +46,9 @@ import java.io.OutputStream;
 import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Date;
+import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -67,6 +70,7 @@ public final class MainActivity extends Activity {
     private static final String KEY_CUSTOM_PRESETS = "custom_presets";
     private static final String KEY_LAST_EDIT = "last_edit";
     private static final String EXPORT_FOLDER = "MyLight";
+    private static final int MAX_UNDO_STEPS = 30;
 
     private static final int PANEL_SIZE = 0;
     private static final int PANEL_COLOR = 1;
@@ -78,6 +82,7 @@ public final class MainActivity extends Activity {
     private final Handler renderHandler = new Handler(Looper.getMainLooper());
     private final GeometryAdjustments geometry = new GeometryAdjustments();
     private final ColorAdjustments adjustments = new ColorAdjustments();
+    private final Deque<EditSnapshot> undoStack = new ArrayDeque<>();
     private CurveSet curves = new CurveSet();
     private final List<SliderBinding> sliderBindings = new ArrayList<>();
 
@@ -100,6 +105,7 @@ public final class MainActivity extends Activity {
     private boolean renderInFlight;
     private boolean renderQueued;
     private boolean queuedInteractive;
+    private boolean compareActive;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -182,14 +188,22 @@ public final class MainActivity extends Activity {
         cropOverlayView = new CropOverlayView(this, geometry);
         cropOverlayView.setImageSize(originalBitmap.getWidth(), originalBitmap.getHeight());
         cropOverlayView.setVisibility(View.GONE);
-        cropOverlayView.setListener(finished -> {
-            if (finished) {
-                renderPreview(false);
-            } else {
-                renderInteractivePreview();
+        cropOverlayView.setListener(new CropOverlayView.Listener() {
+            @Override
+            public void onCropStarted() {
+                pushUndoSnapshot();
             }
-            if (finished) {
-                renderControls();
+
+            @Override
+            public void onCropChanged(boolean finished) {
+                if (finished) {
+                    renderPreview(false);
+                } else {
+                    renderInteractivePreview();
+                }
+                if (finished) {
+                    renderControls();
+                }
             }
         });
         imageFrame.addView(cropOverlayView, new FrameLayout.LayoutParams(
@@ -241,25 +255,56 @@ public final class MainActivity extends Activity {
         title.setTextSize(21f);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        toolbar.addView(title, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        toolbar.addView(title, new LinearLayout.LayoutParams(dp(86),
+                LinearLayout.LayoutParams.MATCH_PARENT));
+
+        HorizontalScrollView actionsScroll = new HorizontalScrollView(this);
+        actionsScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
 
         Button openButton = createButton("相册");
         openButton.setOnClickListener(v -> openImage());
-        toolbar.addView(openButton, new LinearLayout.LayoutParams(dp(76), dp(42)));
+        addToolbarButton(actions, openButton);
+
+        Button undoButton = createButton("撤销");
+        undoButton.setOnClickListener(v -> undoLastEdit());
+        addToolbarButton(actions, undoButton);
+
+        Button compareButton = createButton("对比");
+        compareButton.setOnTouchListener((view, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                compareActive = true;
+                renderComparePreview();
+                return true;
+            }
+            if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+                compareActive = false;
+                renderPreview(false);
+                return true;
+            }
+            return true;
+        });
+        addToolbarButton(actions, compareButton);
 
         Button resetButton = createButton("重置");
         resetButton.setOnClickListener(v -> resetAll());
-        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(dp(76), dp(42));
-        resetParams.leftMargin = dp(8);
-        toolbar.addView(resetButton, resetParams);
+        addToolbarButton(actions, resetButton);
 
         Button saveButton = createButton("保存");
         saveButton.setOnClickListener(v -> saveImage(null));
-        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(76), dp(42));
-        saveParams.leftMargin = dp(8);
-        toolbar.addView(saveButton, saveParams);
+        addToolbarButton(actions, saveButton);
+        actionsScroll.addView(actions);
+        toolbar.addView(actionsScroll, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
         return toolbar;
+    }
+
+    private void addToolbarButton(LinearLayout row, Button button) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(70), dp(42));
+        params.leftMargin = dp(6);
+        row.addView(button, params);
     }
 
     private void rebuildPanelTabs() {
@@ -323,6 +368,7 @@ public final class MainActivity extends Activity {
         controls.addView(ratioRow);
         LinearLayout cropRow = createButtonRow();
         addModeButton(cropRow, "重置裁剪", false, () -> {
+            pushUndoSnapshot();
             geometry.resetCropForMode(sourceAspect());
             cropOverlayView.invalidate();
             renderPreview();
@@ -334,14 +380,17 @@ public final class MainActivity extends Activity {
 
         LinearLayout rotateRow = createButtonRow();
         addModeButton(rotateRow, "左转90", false, () -> {
+            pushUndoSnapshot();
             geometry.quarterTurns = (geometry.quarterTurns + 3) % 4;
             renderPreview();
         });
         addModeButton(rotateRow, "右转90", false, () -> {
+            pushUndoSnapshot();
             geometry.quarterTurns = (geometry.quarterTurns + 1) % 4;
             renderPreview();
         });
         addModeButton(rotateRow, "归零", false, () -> {
+            pushUndoSnapshot();
             geometry.rotateDegrees = 0f;
             geometry.quarterTurns = 0;
             renderControls();
@@ -402,11 +451,19 @@ public final class MainActivity extends Activity {
 
         curveView = new CurveView(this, curves.curveFor(activeCurveChannel));
         curveView.setCurveColor(curveColor(activeCurveChannel));
-        curveView.setListener(finished -> {
-            if (finished) {
-                renderPreview(false);
-            } else {
-                renderInteractivePreview();
+        curveView.setListener(new CurveView.Listener() {
+            @Override
+            public void onCurveStarted() {
+                pushUndoSnapshot();
+            }
+
+            @Override
+            public void onCurveChanged(boolean finished) {
+                if (finished) {
+                    renderPreview(false);
+                } else {
+                    renderInteractivePreview();
+                }
             }
         });
         controls.addView(curveView, new LinearLayout.LayoutParams(
@@ -414,6 +471,7 @@ public final class MainActivity extends Activity {
 
         Button resetCurveButton = createButton("重置当前曲线");
         resetCurveButton.setOnClickListener(v -> {
+            pushUndoSnapshot();
             curves.reset(activeCurveChannel);
             curveView.invalidate();
             renderPreview();
@@ -562,7 +620,9 @@ public final class MainActivity extends Activity {
             }
 
             @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                pushUndoSnapshot();
+            }
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
@@ -585,6 +645,7 @@ public final class MainActivity extends Activity {
     }
 
     private void setCropMode(int mode) {
+        pushUndoSnapshot();
         geometry.cropMode = mode;
         geometry.resetCropForMode(sourceAspect());
         if (cropOverlayView != null) {
@@ -595,6 +656,7 @@ public final class MainActivity extends Activity {
     }
 
     private void applyPreset(Preset preset) {
+        pushUndoSnapshot();
         ColorAdjustments presetAdjustments = preset.adjustments.copy();
         copyAdjustments(presetAdjustments, adjustments);
         curves = preset.newCurves();
@@ -603,6 +665,11 @@ public final class MainActivity extends Activity {
     }
 
     private void resetAll() {
+        pushUndoSnapshot();
+        resetAllInternal();
+    }
+
+    private void resetAllInternal() {
         geometry.reset();
         adjustments.reset();
         curves.reset();
@@ -622,8 +689,19 @@ public final class MainActivity extends Activity {
         if (imageView == null) {
             return;
         }
+        if (compareActive) {
+            renderComparePreview();
+            return;
+        }
         persistCurrentEdit();
         imageView.updateState(previewGeometry(), adjustments, curves, previewDisplayAspect());
+    }
+
+    private void renderComparePreview() {
+        if (imageView == null) {
+            return;
+        }
+        imageView.updateState(previewGeometry(), new ColorAdjustments(), new CurveSet(), previewDisplayAspect());
     }
 
     private GeometryAdjustments previewGeometry() {
@@ -707,9 +785,14 @@ public final class MainActivity extends Activity {
     }
 
     private void openImage() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("image/*");
+        Intent intent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
+            intent.setType("image/*");
+        } else {
+            intent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+            intent.setType("image/*");
+        }
         startActivityForResult(intent, REQUEST_OPEN_IMAGE);
     }
 
@@ -733,7 +816,8 @@ public final class MainActivity extends Activity {
                     if (cropOverlayView != null) {
                         cropOverlayView.setImageSize(scaled.getWidth(), scaled.getHeight());
                     }
-                    resetAll();
+                    undoStack.clear();
+                    resetAllInternal();
                 });
             } catch (IOException exception) {
                 runOnUiThread(() -> Toast.makeText(this, "图片加载失败", Toast.LENGTH_SHORT).show());
@@ -1197,6 +1281,39 @@ public final class MainActivity extends Activity {
         cropOverlayView.invalidate();
     }
 
+    private void pushUndoSnapshot() {
+        undoStack.push(new EditSnapshot(geometry.copy(), adjustments.copy(), curves.copy()));
+        while (undoStack.size() > MAX_UNDO_STEPS) {
+            undoStack.removeLast();
+        }
+    }
+
+    private void undoLastEdit() {
+        if (undoStack.isEmpty()) {
+            Toast.makeText(this, "没有可撤销的修改", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        EditSnapshot snapshot = undoStack.pop();
+        compareActive = false;
+        copyGeometry(snapshot.geometry, geometry);
+        copyAdjustments(snapshot.adjustments, adjustments);
+        curves = snapshot.curves.copy();
+        renderControls();
+        renderPreview(false);
+        Toast.makeText(this, "已撤销", Toast.LENGTH_SHORT).show();
+    }
+
+    private static void copyGeometry(GeometryAdjustments source, GeometryAdjustments target) {
+        target.cropMode = source.cropMode;
+        target.cropLeft = source.cropLeft;
+        target.cropTop = source.cropTop;
+        target.cropRight = source.cropRight;
+        target.cropBottom = source.cropBottom;
+        target.cropZoom = source.cropZoom;
+        target.rotateDegrees = source.rotateDegrees;
+        target.quarterTurns = source.quarterTurns;
+    }
+
     private float sourceAspect() {
         if (originalBitmap == null || originalBitmap.getHeight() == 0) {
             return 1f;
@@ -1220,6 +1337,18 @@ public final class MainActivity extends Activity {
         System.arraycopy(source.mixHue, 0, target.mixHue, 0, source.mixHue.length);
         System.arraycopy(source.mixSaturation, 0, target.mixSaturation, 0, source.mixSaturation.length);
         System.arraycopy(source.mixLuminance, 0, target.mixLuminance, 0, source.mixLuminance.length);
+    }
+
+    private static final class EditSnapshot {
+        final GeometryAdjustments geometry;
+        final ColorAdjustments adjustments;
+        final CurveSet curves;
+
+        EditSnapshot(GeometryAdjustments geometry, ColorAdjustments adjustments, CurveSet curves) {
+            this.geometry = geometry;
+            this.adjustments = adjustments;
+            this.curves = curves;
+        }
     }
 
     private int dp(int value) {

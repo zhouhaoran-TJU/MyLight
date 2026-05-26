@@ -12,6 +12,8 @@ import com.example.lightroomclone.core.GeometryAdjustments;
 
 final class CropOverlayView extends View {
     interface Listener {
+        void onCropStarted();
+
         void onCropChanged(boolean finished);
     }
 
@@ -102,6 +104,9 @@ final class CropOverlayView extends View {
             activeHandle = hitHandle(event.getX(), event.getY());
             if (activeHandle == HANDLE_NONE) {
                 return false;
+            }
+            if (listener != null) {
+                listener.onCropStarted();
             }
             lastX = event.getX();
             lastY = event.getY();

@@ -11,6 +11,8 @@ import com.example.lightroomclone.core.ToneCurve;
 
 final class CurveView extends View {
     interface Listener {
+        void onCurveStarted();
+
         void onCurveChanged(boolean finished);
     }
 
@@ -98,6 +100,9 @@ final class CurveView extends View {
 
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
             getParent().requestDisallowInterceptTouchEvent(true);
+            if (listener != null) {
+                listener.onCurveStarted();
+            }
             int valueX = toCurveX(event.getX(), left, right);
             int valueY = toCurveY(event.getY(), top, bottom);
             int nearest = nearestPoint(event.getX(), event.getY(), left, top, right, bottom);

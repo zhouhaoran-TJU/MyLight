@@ -72,6 +72,7 @@ final class GpuImageView extends GLSurfaceView {
         private float cropZoom;
         private float rotateDegrees;
         private int quarterTurns;
+        private boolean colorMixEnabled;
         private boolean curveDirty = true;
         private boolean stateDirty = true;
 
@@ -108,6 +109,7 @@ final class GpuImageView extends GLSurfaceView {
                 System.arraycopy(sourceAdjustments.mixHue, 0, mixHue, 0, mixHue.length);
                 System.arraycopy(sourceAdjustments.mixSaturation, 0, mixSaturation, 0, mixSaturation.length);
                 System.arraycopy(sourceAdjustments.mixLuminance, 0, mixLuminance, 0, mixLuminance.length);
+                colorMixEnabled = ColorMath.hasColorMix(sourceAdjustments);
                 crop[0] = geometry.cropLeft;
                 crop[1] = geometry.cropTop;
                 crop[2] = geometry.cropRight;
@@ -165,6 +167,7 @@ final class GpuImageView extends GLSurfaceView {
             float localCropZoom;
             float localRotateDegrees;
             int localQuarterTurns;
+            boolean localColorMixEnabled;
             synchronized (lock) {
                 localAdjustments = adjustments.clone();
                 localMixHue = mixHue.clone();
@@ -175,6 +178,7 @@ final class GpuImageView extends GLSurfaceView {
                 localRotateDegrees = rotateDegrees;
                 localQuarterTurns = quarterTurns;
                 localDisplayAspect = displayAspect;
+                localColorMixEnabled = colorMixEnabled;
                 stateDirty = false;
             }
             float[] imageRect = imageRect(localDisplayAspect);
@@ -198,6 +202,7 @@ final class GpuImageView extends GLSurfaceView {
             GLES20.glUniform1fv(uniform("u_mixHue"), localMixHue.length, localMixHue, 0);
             GLES20.glUniform1fv(uniform("u_mixSaturation"), localMixSaturation.length, localMixSaturation, 0);
             GLES20.glUniform1fv(uniform("u_mixLuminance"), localMixLuminance.length, localMixLuminance, 0);
+            GLES20.glUniform1f(uniform("u_mixEnabled"), localColorMixEnabled ? 1f : 0f);
 
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, imageTexture);
@@ -338,6 +343,7 @@ final class GpuImageView extends GLSurfaceView {
                     + "uniform float u_mixHue[8];\n"
                     + "uniform float u_mixSaturation[8];\n"
                     + "uniform float u_mixLuminance[8];\n"
+                    + "uniform float u_mixEnabled;\n"
                     + "float centerAt(int i) {\n"
                     + "  if (i == 0) return 0.0; if (i == 1) return 30.0; if (i == 2) return 60.0; if (i == 3) return 120.0;\n"
                     + "  if (i == 4) return 180.0; if (i == 5) return 230.0; if (i == 6) return 275.0; return 315.0;\n"
@@ -353,7 +359,7 @@ final class GpuImageView extends GLSurfaceView {
                     + "  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)) * 360.0, d / (q.x + e), q.x);\n"
                     + "}\n"
                     + "vec3 hsv2rgb(vec3 c) {\n"
-                    + "  vec3 p = abs(fract(c.xxx / 60.0 + vec3(0.0, 4.0, 2.0) / 6.0) * 6.0 - 3.0);\n"
+                    + "  vec3 p = abs(fract(c.xxx / 360.0 + vec3(0.0, 2.0, 1.0) / 3.0) * 6.0 - 3.0);\n"
                     + "  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);\n"
                     + "}\n"
                     + "float hueWeight(float hue, float center) {\n"
@@ -388,7 +394,7 @@ final class GpuImageView extends GLSurfaceView {
                     + "  l = dot(rgb, vec3(0.299, 0.587, 0.114));\n"
                     + "  float ss = saturation >= 0.0 ? 1.0 + saturation * 1.5 : 1.0 + saturation;\n"
                     + "  rgb = vec3(l) + (rgb - vec3(l)) * ss;\n"
-                    + "  rgb = applyMix(rgb);\n"
+                    + "  if (u_mixEnabled > 0.5) rgb = applyMix(rgb);\n"
                     + "  rgb += vec3(temperature * 0.12 + tint * 0.04, -tint * 0.08, -temperature * 0.12 + tint * 0.04);\n"
                     + "  if (fade > 0.0) rgb = rgb * (1.0 - fade * 0.35) + vec3(0.06 * fade);\n"
                     + "  float edge = smoothstep(0.18, 0.72, distance(p, vec2(0.5)));\n"
