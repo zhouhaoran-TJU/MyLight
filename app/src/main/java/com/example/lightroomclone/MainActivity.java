@@ -13,6 +13,7 @@ import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ImageDecoder;
@@ -60,6 +61,7 @@ import com.example.lightroomclone.core.GeometryAdjustments;
 import com.example.lightroomclone.core.ToneCurve;
 
 import java.io.IOException;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.File;
@@ -95,10 +97,12 @@ public final class MainActivity extends Activity {
     private static final String PREFS_NAME = "tonelab_memory";
     private static final String KEY_CUSTOM_PRESETS = "custom_presets";
     private static final String KEY_LAST_EDIT = "last_edit";
+    private static final String KEY_LAST_IMAGE_URI = "last_image_uri";
     private static final String KEY_DRAFTS = "drafts";
     private static final String KEY_EXPORT_QUALITY = "export_quality";
     private static final String KEY_EXPORT_SIZE = "export_size";
     private static final String EXPORT_FOLDER = "MyLight";
+    private static final String SESSION_IMAGE_NAME = "last_session.jpg";
     private static final int MAX_UNDO_STEPS = 30;
 
     private static final int PANEL_FILTER = 0;
@@ -162,6 +166,8 @@ public final class MainActivity extends Activity {
     private boolean compareSliderMode;
     private boolean localDraggingCenter;
     private boolean localDraggingRadius;
+    private boolean autoOpenAttempted;
+    private boolean restoringSession;
     private float compareSplit = 0.5f;
     private int exportQuality = 95;
     private int exportSizeMode;
@@ -204,7 +210,16 @@ public final class MainActivity extends Activity {
         previewBitmap = originalBitmap;
         setContentView(createContentView());
         renderControls();
-        renderPreview();
+        if (!restoreLastSession()) {
+            renderPreview();
+            openImageOnceAfterLaunch();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        persistCurrentEdit();
+        super.onPause();
     }
 
     @Override
@@ -825,6 +840,7 @@ public final class MainActivity extends Activity {
                 .setTitle("更多操作")
                 .setItems(new String[] {
                         "历史记录",
+                        "一键优化",
                         "导出设置",
                         compareSliderMode ? "关闭滑杆对比" : "开启滑杆对比",
                         clippingWarningEnabled ? "关闭裁切警告" : "开启裁切警告",
@@ -843,32 +859,34 @@ public final class MainActivity extends Activity {
                     if (which == 0) {
                         showHistoryDialog();
                     } else if (which == 1) {
-                        showExportSettingsDialog();
+                        autoEnhance();
                     } else if (which == 2) {
+                        showExportSettingsDialog();
+                    } else if (which == 3) {
                         compareSliderMode = !compareSliderMode;
                         renderPreview(false);
-                    } else if (which == 3) {
+                    } else if (which == 4) {
                         clippingWarningEnabled = !clippingWarningEnabled;
                         renderPreview(false);
-                    } else if (which == 4) {
-                        openBatchImages();
                     } else if (which == 5) {
-                        exportBatchImages();
+                        openBatchImages();
                     } else if (which == 6) {
-                        showImportFiltersDialog();
+                        exportBatchImages();
                     } else if (which == 7) {
-                        showExportFiltersDialog();
+                        showImportFiltersDialog();
                     } else if (which == 8) {
-                        saveDraft();
+                        showExportFiltersDialog();
                     } else if (which == 9) {
-                        showDraftsDialog();
+                        saveDraft();
                     } else if (which == 10) {
-                        copyPresetShareCode();
+                        showDraftsDialog();
                     } else if (which == 11) {
-                        showImportShareCodeDialog();
+                        copyPresetShareCode();
                     } else if (which == 12) {
-                        resetAll();
+                        showImportShareCodeDialog();
                     } else if (which == 13) {
+                        resetAll();
+                    } else if (which == 14) {
                         previewZoom = 1f;
                         previewPanX = 0f;
                         previewPanY = 0f;
@@ -1092,10 +1110,6 @@ public final class MainActivity extends Activity {
 
     private void renderLightPanel() {
         controls.addView(createSectionLabel("光线"));
-        LinearLayout actionRow = createButtonRow();
-        addModeButton(actionRow, "一键优化", false, this::autoEnhance);
-        addModeButton(actionRow, "历史记录", false, this::showHistoryDialog);
-        controls.addView(actionRow);
         addSlider("曝光", adjustments.exposure, -1f, 1f, value -> adjustments.exposure = value);
         addSlider("明亮度", adjustments.brightness, -1f, 1f, value -> adjustments.brightness = value);
         addSlider("高光", adjustments.highlights, -1f, 1f, value -> adjustments.highlights = value);
@@ -1503,7 +1517,9 @@ public final class MainActivity extends Activity {
     }
 
     private void addCurveButton(LinearLayout row, String label, int channel, int color) {
-        addModeButton(row, label, activeCurveChannel == channel, () -> {
+        Button button = createButton(label, activeCurveChannel == channel, color);
+        button.setTypeface(Typeface.DEFAULT, activeCurveChannel == channel ? Typeface.BOLD : Typeface.NORMAL);
+        button.setOnClickListener(v -> {
             activeCurveChannel = channel;
             if (curveView != null) {
                 curveView.setCurve(curves.curveFor(activeCurveChannel));
@@ -1511,6 +1527,10 @@ public final class MainActivity extends Activity {
             }
             renderControls();
         });
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(40), 1f);
+        params.leftMargin = dp(3);
+        params.rightMargin = dp(3);
+        row.addView(button, params);
     }
 
     private void addSlider(String label, float initialValue, float min, float max, SliderConsumer consumer) {
@@ -2135,12 +2155,20 @@ public final class MainActivity extends Activity {
 
     private void openImage() {
         Intent intent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
-        intent.setType("*/*");
+        intent.setType("image/*");
         intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
                 "image/*", "image/x-adobe-dng", "image/dng", "application/octet-stream"
         });
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         startActivityForResult(intent, REQUEST_OPEN_IMAGE);
+    }
+
+    private void openImageOnceAfterLaunch() {
+        if (autoOpenAttempted || originalImageUri != null) {
+            return;
+        }
+        autoOpenAttempted = true;
+        renderHandler.postDelayed(this::openImage, 250L);
     }
 
     private void openBatchImages() {
@@ -2167,7 +2195,98 @@ public final class MainActivity extends Activity {
         Toast.makeText(this, "已选择 " + batchImageUris.size() + " 张图片", Toast.LENGTH_SHORT).show();
     }
 
+    private boolean restoreLastSession() {
+        if (preferences == null) {
+            return false;
+        }
+        File sessionImage = sessionImageFile();
+        if (!sessionImage.exists()) {
+            return false;
+        }
+        try {
+            restoringSession = true;
+            Bitmap cached = BitmapFactory.decodeFile(sessionImage.getAbsolutePath());
+            if (cached == null) {
+                throw new IOException("Session image decode failed");
+            }
+            Bitmap scaled = scaleDown(cached.copy(Bitmap.Config.ARGB_8888, false), MAX_PREVIEW_SIZE);
+            if (scaled != cached && !cached.isRecycled()) {
+                cached.recycle();
+            }
+            renderHandler.post(() -> applyLoadedBitmap(null, scaled, true));
+            return true;
+        } catch (IOException | RuntimeException exception) {
+            restoringSession = false;
+            clearSavedSessionImage();
+            return false;
+        }
+    }
+
+    private boolean restoreLastEditParameters() {
+        if (preferences == null) {
+            restoringSession = false;
+            return false;
+        }
+        String saved = preferences.getString(KEY_LAST_EDIT, "");
+        if (saved == null || saved.isEmpty()) {
+            restoringSession = false;
+            return false;
+        }
+        try {
+            JSONObject object = new JSONObject(saved);
+            if (object.has("geometry")) {
+                readGeometry(object.getJSONObject("geometry"));
+            }
+            readAdjustments(object.getJSONObject("adjustments"), adjustments);
+            readCurves(object.getJSONArray("curves"), curves);
+            restoringSession = false;
+            return true;
+        } catch (JSONException exception) {
+            restoringSession = false;
+            preferences.edit().remove(KEY_LAST_EDIT).apply();
+            return false;
+        }
+    }
+
+    private void saveLastImageUri(Uri uri) {
+        if (preferences == null || uri == null) {
+            return;
+        }
+        preferences.edit().putString(KEY_LAST_IMAGE_URI, uri.toString()).apply();
+    }
+
+    private void clearSavedSessionImage() {
+        if (preferences != null) {
+            preferences.edit().remove(KEY_LAST_IMAGE_URI).apply();
+        }
+        File file = sessionImageFile();
+        if (file.exists() && !file.delete()) {
+            file.deleteOnExit();
+        }
+        originalImageUri = null;
+        restoringSession = false;
+    }
+
+    private File sessionImageFile() {
+        return new File(getFilesDir(), SESSION_IMAGE_NAME);
+    }
+
+    private void cacheSessionImage(Bitmap bitmap) {
+        if (bitmap == null || bitmap.isRecycled()) {
+            return;
+        }
+        try (FileOutputStream outputStream = new FileOutputStream(sessionImageFile())) {
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 96, outputStream);
+        } catch (IOException ignored) {
+            // Session restore is best effort.
+        }
+    }
+
     private void loadImage(Uri uri) {
+        loadImage(uri, false);
+    }
+
+    private void loadImage(Uri uri, boolean restoreEdit) {
         renderExecutor.execute(() -> {
             try {
                 Bitmap bitmap = decodeBitmap(uri);
@@ -2176,37 +2295,62 @@ public final class MainActivity extends Activity {
                     bitmap.recycle();
                 }
                 runOnUiThread(() -> {
-                    if (originalBitmap != null && originalBitmap != previewBitmap && !originalBitmap.isRecycled()) {
-                        originalBitmap.recycle();
-                    }
-                    if (previewBitmap != null && previewBitmap != originalBitmap && !previewBitmap.isRecycled()) {
-                        previewBitmap.recycle();
-                    }
-                    originalBitmap = scaled;
-                    previewBitmap = scaled;
-                    originalImageUri = uri;
-                    clearFilterThumbnailCache();
-                    presetStripScrollX = 0;
-                    rebuildRenderSources();
-                    renderVersion.incrementAndGet();
-                    renderHandler.removeCallbacks(qualityRenderRunnable);
-                    renderInFlight = false;
-                    renderQueued = false;
-                    queuedInteractive = false;
-                    compareActive = false;
-                    setDisplayedBitmap(previewBitmap);
-                    if (cropOverlayView != null) {
-                        cropOverlayView.setImageSize(scaled.getWidth(), scaled.getHeight());
-                    }
-                    undoStack.clear();
-                    redoStack.clear();
-                    undoLabels.clear();
-                    resetAllInternal();
+                    applyLoadedBitmap(uri, scaled, restoreEdit);
                 });
             } catch (IOException exception) {
-                runOnUiThread(() -> Toast.makeText(this, "图片加载失败", Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> {
+                    if (restoreEdit) {
+                        clearSavedSessionImage();
+                        renderPreview();
+                        openImageOnceAfterLaunch();
+                    } else {
+                        Toast.makeText(this, "图片加载失败", Toast.LENGTH_SHORT).show();
+                    }
+                });
             }
         });
+    }
+
+    private void applyLoadedBitmap(Uri uri, Bitmap scaled, boolean restoreEdit) {
+        if (originalBitmap != null && originalBitmap != previewBitmap && !originalBitmap.isRecycled()) {
+            originalBitmap.recycle();
+        }
+        if (previewBitmap != null && previewBitmap != originalBitmap && !previewBitmap.isRecycled()) {
+            previewBitmap.recycle();
+        }
+        originalBitmap = scaled;
+        previewBitmap = scaled;
+        originalImageUri = uri;
+        if (uri != null) {
+            saveLastImageUri(uri);
+        }
+        cacheSessionImage(scaled);
+        clearFilterThumbnailCache();
+        presetStripScrollX = 0;
+        rebuildRenderSources();
+        renderVersion.incrementAndGet();
+        renderHandler.removeCallbacks(qualityRenderRunnable);
+        renderInFlight = false;
+        renderQueued = false;
+        queuedInteractive = false;
+        compareActive = false;
+        setDisplayedBitmap(previewBitmap);
+        if (cropOverlayView != null) {
+            cropOverlayView.setImageSize(scaled.getWidth(), scaled.getHeight());
+        }
+        undoStack.clear();
+        redoStack.clear();
+        undoLabels.clear();
+        if (restoreEdit && restoreLastEditParameters()) {
+            activeFilterPreset = null;
+            filterBaseAdjustments = null;
+            filterBaseCurves = null;
+            filterStrength = 1f;
+            renderControls();
+            renderPreview(false);
+            return;
+        }
+        resetAllInternal();
     }
 
     private Bitmap decodeBitmap(Uri uri) throws IOException {
@@ -2850,7 +2994,7 @@ public final class MainActivity extends Activity {
     }
 
     private void persistCurrentEdit() {
-        if (preferences == null) {
+        if (preferences == null || restoringSession) {
             return;
         }
         try {
