@@ -43,6 +43,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -114,6 +115,7 @@ public final class MainActivity extends Activity {
     private final List<SliderBinding> sliderBindings = new ArrayList<>();
 
     private GpuImageView imageView;
+    private ImageView previewImageView;
     private LinearLayout panelTabs;
     private LinearLayout controls;
     private ScrollView controlScroll;
@@ -266,10 +268,18 @@ public final class MainActivity extends Activity {
         setGradientBackground(imageFrame, Color.rgb(5, 7, 12), Color.rgb(17, 24, 36),
                 GradientDrawable.Orientation.TL_BR);
         imageView = new GpuImageView(this);
-        imageView.setImageBitmap(previewBitmap);
+        imageView.setVisibility(View.GONE);
         imageView.setOnTouchListener((view, event) -> handlePreviewTouch(event));
         imageFrame.addView(imageView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        previewImageView = new ImageView(this);
+        previewImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        previewImageView.setAdjustViewBounds(false);
+        previewImageView.setBackgroundColor(Color.TRANSPARENT);
+        previewImageView.setOnTouchListener((view, event) -> handlePreviewTouch(event));
+        imageFrame.addView(previewImageView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        setDisplayedBitmap(previewBitmap);
         applyPreviewTransform();
         cropOverlayView = new CropOverlayView(this, geometry);
         cropOverlayView.setImageSize(originalBitmap.getWidth(), originalBitmap.getHeight());
@@ -357,7 +367,7 @@ public final class MainActivity extends Activity {
 
     private boolean handlePreviewTouch(MotionEvent event) {
         if (compareSliderMode) {
-            compareSplit = clamp(event.getX() / Math.max(1f, imageView.getWidth()), 0.02f, 0.98f);
+            compareSplit = clamp(event.getX() / Math.max(1f, previewSurfaceWidth()), 0.02f, 0.98f);
             renderPreview(false);
             return true;
         }
@@ -421,11 +431,11 @@ public final class MainActivity extends Activity {
 
     private boolean handleLocalDrag(MotionEvent event) {
         int index = activeLocalIndex();
-        if (index < 0 || imageView == null) {
+        if (index < 0 || previewImageView == null) {
             return false;
         }
-        float width = Math.max(1f, imageView.getWidth());
-        float height = Math.max(1f, imageView.getHeight());
+        float width = Math.max(1f, previewImageView.getWidth());
+        float height = Math.max(1f, previewImageView.getHeight());
         float x = event.getX();
         float y = event.getY();
         float cx = adjustments.localXs[index] * width;
@@ -467,8 +477,31 @@ public final class MainActivity extends Activity {
         return false;
     }
 
+    private void setDisplayedBitmap(Bitmap bitmap) {
+        if (previewImageView != null) {
+            previewImageView.setImageBitmap(bitmap);
+        }
+        if (imageView != null && imageView.getVisibility() == View.VISIBLE) {
+            imageView.setImageBitmap(bitmap);
+        }
+    }
+
+    private int previewSurfaceWidth() {
+        if (previewImageView != null && previewImageView.getWidth() > 0) {
+            return previewImageView.getWidth();
+        }
+        return imageView == null ? 1 : Math.max(1, imageView.getWidth());
+    }
+
+    private int previewSurfaceHeight() {
+        if (previewImageView != null && previewImageView.getHeight() > 0) {
+            return previewImageView.getHeight();
+        }
+        return imageView == null ? 1 : Math.max(1, imageView.getHeight());
+    }
+
     private void applyPreviewTransform() {
-        if (imageView == null) {
+        if (previewImageView == null) {
             return;
         }
         if (previewZoom <= 1.01f) {
@@ -476,14 +509,20 @@ public final class MainActivity extends Activity {
             previewPanX = 0f;
             previewPanY = 0f;
         }
-        float maxPanX = Math.max(0f, imageView.getWidth() * (previewZoom - 1f) * 0.5f);
-        float maxPanY = Math.max(0f, imageView.getHeight() * (previewZoom - 1f) * 0.5f);
+        float maxPanX = Math.max(0f, previewSurfaceWidth() * (previewZoom - 1f) * 0.5f);
+        float maxPanY = Math.max(0f, previewSurfaceHeight() * (previewZoom - 1f) * 0.5f);
         previewPanX = clamp(previewPanX, -maxPanX, maxPanX);
         previewPanY = clamp(previewPanY, -maxPanY, maxPanY);
-        imageView.setScaleX(previewZoom);
-        imageView.setScaleY(previewZoom);
-        imageView.setTranslationX(previewPanX);
-        imageView.setTranslationY(previewPanY);
+        if (imageView != null && imageView.getVisibility() == View.VISIBLE) {
+            imageView.setScaleX(previewZoom);
+            imageView.setScaleY(previewZoom);
+            imageView.setTranslationX(previewPanX);
+            imageView.setTranslationY(previewPanY);
+        }
+        previewImageView.setScaleX(previewZoom);
+        previewImageView.setScaleY(previewZoom);
+        previewImageView.setTranslationX(previewPanX);
+        previewImageView.setTranslationY(previewPanY);
     }
 
     private void startWhiteBalancePicker() {
@@ -597,11 +636,11 @@ public final class MainActivity extends Activity {
     }
 
     private void applyWhiteBalanceFromTap(float x, float y) {
-        if (originalBitmap == null || imageView == null) {
+        if (originalBitmap == null || previewImageView == null) {
             return;
         }
-        float nx = clamp(x / Math.max(1f, imageView.getWidth()), 0f, 1f);
-        float ny = clamp(y / Math.max(1f, imageView.getHeight()), 0f, 1f);
+        float nx = clamp(x / Math.max(1f, previewImageView.getWidth()), 0f, 1f);
+        float ny = clamp(y / Math.max(1f, previewImageView.getHeight()), 0f, 1f);
         int px = Math.max(0, Math.min(originalBitmap.getWidth() - 1,
                 Math.round(nx * (originalBitmap.getWidth() - 1))));
         int py = Math.max(0, Math.min(originalBitmap.getHeight() - 1,
@@ -620,14 +659,14 @@ public final class MainActivity extends Activity {
     }
 
     private void applyLocalCenterFromTap(float x, float y) {
-        if (imageView == null) {
+        if (previewImageView == null) {
             return;
         }
         pushUndoSnapshot("局部中心");
         ensureLocalPoint();
         int index = activeLocalIndex();
-        adjustments.localXs[index] = clamp(x / Math.max(1f, imageView.getWidth()), 0f, 1f);
-        adjustments.localYs[index] = clamp(y / Math.max(1f, imageView.getHeight()), 0f, 1f);
+        adjustments.localXs[index] = clamp(x / Math.max(1f, previewImageView.getWidth()), 0f, 1f);
+        adjustments.localYs[index] = clamp(y / Math.max(1f, previewImageView.getHeight()), 0f, 1f);
         syncActiveLocalFromArrays();
         localPickMode = false;
         renderControls();
@@ -1589,7 +1628,7 @@ public final class MainActivity extends Activity {
     }
 
     private void renderPreview(boolean interactive) {
-        if (imageView == null) {
+        if (previewImageView == null && imageView == null) {
             return;
         }
         if (compareActive) {
@@ -1600,8 +1639,26 @@ public final class MainActivity extends Activity {
             compareLabel.setVisibility(View.GONE);
         }
         persistCurrentEdit();
-        imageView.updateState(previewGeometry(), adjustments, curves, previewDisplayAspect(),
-                clippingWarningEnabled, compareSliderMode, compareSplit);
+        if (previewBitmap != null && !previewBitmap.isRecycled()) {
+            setDisplayedBitmap(previewBitmap);
+        } else if (originalBitmap != null && !originalBitmap.isRecycled()) {
+            setDisplayedBitmap(originalBitmap);
+        }
+        if (imageView != null && imageView.getVisibility() == View.VISIBLE) {
+            imageView.updateState(previewGeometry(), adjustments, curves, previewDisplayAspect(),
+                    clippingWarningEnabled, compareSliderMode, compareSplit);
+        }
+        int version = renderVersion.incrementAndGet();
+        renderHandler.removeCallbacks(qualityRenderRunnable);
+        if (renderInFlight) {
+            renderQueued = true;
+            queuedInteractive = interactive;
+        } else {
+            startRender(version, interactive);
+        }
+        if (interactive) {
+            renderHandler.postDelayed(qualityRenderRunnable, QUALITY_RENDER_DELAY_MS);
+        }
         updateLocalOverlay();
         updateStatusPill();
         updateHistogramAsync();
@@ -1611,7 +1668,7 @@ public final class MainActivity extends Activity {
         if (statusPill == null) {
             return;
         }
-        StringBuilder status = new StringBuilder("GPU 实时");
+        StringBuilder status = new StringBuilder("实时预览");
         if (adjustPanelsHaveChanges() || panelHasChanges(PANEL_FILTER)
                 || panelHasChanges(PANEL_CURVE) || panelHasChanges(PANEL_SIZE)) {
             status.append("  ·  已修改");
@@ -1737,14 +1794,23 @@ public final class MainActivity extends Activity {
     }
 
     private void renderComparePreview() {
-        if (imageView == null) {
+        if (previewImageView == null && imageView == null) {
             return;
         }
+        renderVersion.incrementAndGet();
+        renderHandler.removeCallbacks(qualityRenderRunnable);
+        renderQueued = false;
+        queuedInteractive = false;
         if (compareLabel != null) {
             compareLabel.setVisibility(View.VISIBLE);
         }
-        imageView.updateState(previewGeometry(), new ColorAdjustments(), new CurveSet(),
-                previewDisplayAspect(), false, false, compareSplit);
+        if (originalBitmap != null && !originalBitmap.isRecycled()) {
+            setDisplayedBitmap(originalBitmap);
+        }
+        if (imageView != null && imageView.getVisibility() == View.VISIBLE) {
+            imageView.updateState(previewGeometry(), new ColorAdjustments(), new CurveSet(),
+                    previewDisplayAspect(), false, false, compareSplit);
+        }
     }
 
     private void updateHistogramAsync() {
@@ -1830,7 +1896,8 @@ public final class MainActivity extends Activity {
     }
 
     private void startRender(int version, boolean interactive) {
-        Bitmap source = interactive ? fastSourceBitmap : qualitySourceBitmap;
+        Bitmap source = activePanel == PANEL_SIZE ? originalBitmap
+                : (interactive ? fastSourceBitmap : qualitySourceBitmap);
         if (source == null) {
             source = originalBitmap;
         }
@@ -1844,7 +1911,7 @@ public final class MainActivity extends Activity {
         renderInFlight = true;
         renderExecutor.execute(() -> {
             if (version != renderVersion.get()) {
-                runOnUiThread(this::finishRenderAndRunQueued);
+                runOnUiThread(this::finishStaleRender);
                 return;
             }
             int maxEdge = Math.max(renderSource.getWidth(), renderSource.getHeight());
@@ -1869,7 +1936,7 @@ public final class MainActivity extends Activity {
                     previewBitmap.recycle();
                 }
                 previewBitmap = rendered;
-                imageView.setImageBitmap(previewBitmap);
+                setDisplayedBitmap(previewBitmap);
                 runQueuedRenderIfNeeded();
             });
         });
@@ -1877,6 +1944,15 @@ public final class MainActivity extends Activity {
 
     private void finishRenderAndRunQueued() {
         renderInFlight = false;
+        runQueuedRenderIfNeeded();
+    }
+
+    private void finishStaleRender() {
+        renderInFlight = false;
+        if (!renderQueued && renderVersion.get() > 0) {
+            renderQueued = true;
+            queuedInteractive = false;
+        }
         runQueuedRenderIfNeeded();
     }
 
@@ -1943,9 +2019,13 @@ public final class MainActivity extends Activity {
                     previewBitmap = scaled;
                     originalImageUri = uri;
                     rebuildRenderSources();
-                    if (imageView != null) {
-                        imageView.setImageBitmap(previewBitmap);
-                    }
+                    renderVersion.incrementAndGet();
+                    renderHandler.removeCallbacks(qualityRenderRunnable);
+                    renderInFlight = false;
+                    renderQueued = false;
+                    queuedInteractive = false;
+                    compareActive = false;
+                    setDisplayedBitmap(previewBitmap);
                     if (cropOverlayView != null) {
                         cropOverlayView.setImageSize(scaled.getWidth(), scaled.getHeight());
                     }
