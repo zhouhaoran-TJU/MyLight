@@ -19,9 +19,12 @@ import android.graphics.ImageDecoder;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
@@ -67,6 +70,8 @@ import java.util.Date;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -83,6 +88,9 @@ public final class MainActivity extends Activity {
     private static final int MAX_PREVIEW_SIZE = 1400;
     private static final int RENDER_FAST_MAX_EDGE = 540;
     private static final int RENDER_QUALITY_MAX_EDGE = 960;
+    private static final int FILTER_THUMB_WIDTH = 128;
+    private static final int FILTER_THUMB_HEIGHT = 92;
+    private static final int FILTER_THUMB_SOURCE_EDGE = 220;
     private static final long QUALITY_RENDER_DELAY_MS = 180L;
     private static final String PREFS_NAME = "tonelab_memory";
     private static final String KEY_CUSTOM_PRESETS = "custom_presets";
@@ -113,9 +121,11 @@ public final class MainActivity extends Activity {
     private final List<Uri> batchImageUris = new ArrayList<>();
     private CurveSet curves = new CurveSet();
     private final List<SliderBinding> sliderBindings = new ArrayList<>();
+    private final Map<String, Bitmap> filterThumbnailCache = new HashMap<>();
 
     private GpuImageView imageView;
     private ImageView previewImageView;
+    private HorizontalScrollView presetScrollView;
     private LinearLayout panelTabs;
     private LinearLayout controls;
     private ScrollView controlScroll;
@@ -168,6 +178,7 @@ public final class MainActivity extends Activity {
     private ColorAdjustments filterBaseAdjustments;
     private CurveSet filterBaseCurves;
     private float filterStrength = 1f;
+    private int presetStripScrollX;
     private final Runnable previewCompareRunnable = () -> {
         previewCompareArmed = false;
         compareActive = true;
@@ -201,6 +212,7 @@ public final class MainActivity extends Activity {
         renderExecutor.shutdownNow();
         renderHandler.removeCallbacksAndMessages(null);
         recycleRenderSources();
+        clearFilterThumbnailCache();
         super.onDestroy();
     }
 
@@ -1065,17 +1077,17 @@ public final class MainActivity extends Activity {
     private void renderFilterPanel() {
         controls.addView(createSectionLabel("预设滤镜"));
         controls.addView(createPresetStrip());
-        controls.addView(createSectionLabel("常用"));
-        addSlider("曝光", adjustments.exposure, -1f, 1f, value -> adjustments.exposure = value);
-        addSlider("对比度", adjustments.contrast, -1f, 1f, value -> adjustments.contrast = value);
-        addSlider("色温", adjustments.temperature, -1f, 1f, value -> adjustments.temperature = value);
-        addSlider("饱和度", adjustments.saturation, -1f, 1f, value -> adjustments.saturation = value);
         if (activeFilterPreset != null) {
             addSlider("滤镜强度", filterStrength, 0f, 1f, value -> {
                 filterStrength = value;
                 applyFilterStrength();
             });
         }
+        controls.addView(createSectionLabel("常用"));
+        addSlider("曝光", adjustments.exposure, -1f, 1f, value -> adjustments.exposure = value);
+        addSlider("对比度", adjustments.contrast, -1f, 1f, value -> adjustments.contrast = value);
+        addSlider("色温", adjustments.temperature, -1f, 1f, value -> adjustments.temperature = value);
+        addSlider("饱和度", adjustments.saturation, -1f, 1f, value -> adjustments.saturation = value);
     }
 
     private void renderLightPanel() {
@@ -1242,29 +1254,34 @@ public final class MainActivity extends Activity {
 
     private View createPresetStrip() {
         HorizontalScrollView scrollView = new HorizontalScrollView(this);
+        presetScrollView = scrollView;
         scrollView.setHorizontalScrollBarEnabled(false);
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setPadding(0, 0, 0, dp(10));
         Preset lastEdit = loadLastEditPreset();
         if (lastEdit != null) {
-            Button button = createPresetButton("上次修改\n记忆", true, lastEdit);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(118), dp(70));
+            Button button = createPresetButton("上次修改\n记忆", true, lastEdit, "last");
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(124), dp(82));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
         Button saveFilterButton = createButton("存为滤镜\n当前", true);
+        saveFilterButton.setBackground(createFilterButtonBackground(currentPreviewThumbnail(), true));
+        saveFilterButton.setTextColor(Color.WHITE);
+        saveFilterButton.setShadowLayer(dp(2), 0f, dp(1), Color.argb(190, 0, 0, 0));
+        saveFilterButton.setElevation(dp(5));
         saveFilterButton.setOnClickListener(v -> showSaveFilterDialog());
-        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(118), dp(70));
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(124), dp(82));
         saveParams.rightMargin = dp(8);
         row.addView(saveFilterButton, saveParams);
         for (Preset preset : Preset.defaults()) {
-            Button button = createPresetButton(preset.name + "\n默认", false, preset);
+            Button button = createPresetButton(preset.name + "\n默认", false, preset, "default");
             button.setOnLongClickListener(v -> {
                 Toast.makeText(this, "默认滤镜不可管理，可保存为自定义滤镜", Toast.LENGTH_SHORT).show();
                 return true;
             });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(104), dp(70));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(112), dp(82));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
@@ -1272,29 +1289,171 @@ public final class MainActivity extends Activity {
         for (int i = 0; i < customPresets.size(); i++) {
             final int index = i;
             Preset preset = customPresets.get(i);
-            Button button = createPresetButton(preset.name + "\n自定义", false, preset);
+            Button button = createPresetButton(preset.name + "\n自定义", false, preset, "custom:" + index);
             button.setOnLongClickListener(v -> {
                 showCustomPresetMenu(index, preset.name);
                 return true;
             });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(114), dp(70));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(118), dp(82));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
         scrollView.addView(row);
+        scrollView.post(() -> scrollView.scrollTo(presetStripScrollX, 0));
         return scrollView;
     }
 
-    private Button createPresetButton(String label, boolean selected, Preset preset) {
+    private Button createPresetButton(String label, boolean selected, Preset preset, String group) {
         Button button = createButton(label, selected || isActiveFilter(preset));
-        button.setOnClickListener(v -> applyPreset(preset));
+        boolean active = selected || isActiveFilter(preset);
+        button.setBackground(createFilterButtonBackground(filterThumbnailFor(preset, group), active));
+        button.setTextColor(Color.WHITE);
+        button.setShadowLayer(dp(2), 0f, dp(1), Color.argb(210, 0, 0, 0));
+        button.setOnClickListener(v -> {
+            rememberPresetStripPosition();
+            applyPreset(preset);
+        });
         button.setGravity(Gravity.CENTER);
         button.setTextSize(11f);
+        button.setTypeface(Typeface.DEFAULT, active ? Typeface.BOLD : Typeface.NORMAL);
+        button.setElevation(active ? dp(7) : dp(2));
         return button;
     }
 
     private boolean isActiveFilter(Preset preset) {
         return activeFilterPreset != null && activeFilterPreset.name.equals(preset.name);
+    }
+
+    private void rememberPresetStripPosition() {
+        if (presetScrollView != null) {
+            presetStripScrollX = presetScrollView.getScrollX();
+        }
+    }
+
+    private Bitmap currentPreviewThumbnail() {
+        Bitmap source = previewBitmap != null && !previewBitmap.isRecycled() ? previewBitmap : originalBitmap;
+        if (source == null || source.isRecycled()) {
+            return null;
+        }
+        return centerCropThumbnail(source, FILTER_THUMB_WIDTH, FILTER_THUMB_HEIGHT);
+    }
+
+    private Bitmap filterThumbnailFor(Preset preset, String group) {
+        Bitmap source = fastSourceBitmap != null && !fastSourceBitmap.isRecycled() ? fastSourceBitmap : originalBitmap;
+        if (source == null || source.isRecycled()) {
+            return null;
+        }
+        String key = filterThumbnailKey(preset, group, source);
+        Bitmap cached = filterThumbnailCache.get(key);
+        if (cached != null && !cached.isRecycled()) {
+            return cached;
+        }
+        Bitmap rendered = null;
+        try {
+            Bitmap thumbSource = scaleDown(source, FILTER_THUMB_SOURCE_EDGE);
+            rendered = ImageProcessor.applyFastPreview(thumbSource, new GeometryAdjustments(),
+                    preset.adjustments, preset.curves, FILTER_THUMB_SOURCE_EDGE, () -> false);
+            if (thumbSource != source && !thumbSource.isRecycled()) {
+                thumbSource.recycle();
+            }
+        } catch (RuntimeException exception) {
+            rendered = null;
+        }
+        Bitmap thumbnail = rendered == null ? centerCropThumbnail(source, FILTER_THUMB_WIDTH, FILTER_THUMB_HEIGHT)
+                : centerCropThumbnail(rendered, FILTER_THUMB_WIDTH, FILTER_THUMB_HEIGHT);
+        if (rendered != null && !rendered.isRecycled()) {
+            rendered.recycle();
+        }
+        filterThumbnailCache.put(key, thumbnail);
+        return thumbnail;
+    }
+
+    private String filterThumbnailKey(Preset preset, String group, Bitmap source) {
+        StringBuilder key = new StringBuilder(group).append(':').append(preset.name)
+                .append(':').append(source.getWidth()).append('x').append(source.getHeight());
+        appendAdjustmentKey(key, preset.adjustments);
+        appendCurveKey(key, preset.curves.luminance);
+        appendCurveKey(key, preset.curves.red);
+        appendCurveKey(key, preset.curves.green);
+        appendCurveKey(key, preset.curves.blue);
+        return key.toString();
+    }
+
+    private void appendAdjustmentKey(StringBuilder key, ColorAdjustments source) {
+        key.append(':').append(Float.floatToIntBits(source.brightness))
+                .append(':').append(Float.floatToIntBits(source.contrast))
+                .append(':').append(Float.floatToIntBits(source.saturation))
+                .append(':').append(Float.floatToIntBits(source.temperature))
+                .append(':').append(Float.floatToIntBits(source.tint))
+                .append(':').append(Float.floatToIntBits(source.exposure))
+                .append(':').append(Float.floatToIntBits(source.highlights))
+                .append(':').append(Float.floatToIntBits(source.shadows))
+                .append(':').append(Float.floatToIntBits(source.fade))
+                .append(':').append(Float.floatToIntBits(source.vignette))
+                .append(':').append(Float.floatToIntBits(source.dehaze))
+                .append(':').append(Float.floatToIntBits(source.ambiance))
+                .append(':').append(Float.floatToIntBits(source.sharpness))
+                .append(':').append(Float.floatToIntBits(source.noiseReduction))
+                .append(':').append(Float.floatToIntBits(source.grain));
+        for (int i = 0; i < ColorAdjustments.MIX_COUNT; i++) {
+            key.append(':').append(Float.floatToIntBits(source.mixHue[i]))
+                    .append(':').append(Float.floatToIntBits(source.mixSaturation[i]))
+                    .append(':').append(Float.floatToIntBits(source.mixLuminance[i]));
+        }
+    }
+
+    private void appendCurveKey(StringBuilder key, ToneCurve curve) {
+        for (int i = 0; i < curve.pointCount(); i++) {
+            key.append(':').append(curve.getX(i)).append(',').append(curve.getY(i));
+        }
+    }
+
+    private Bitmap centerCropThumbnail(Bitmap source, int width, int height) {
+        Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(output);
+        canvas.drawColor(Color.rgb(9, 12, 18));
+        float scale = Math.max(width / (float) source.getWidth(), height / (float) source.getHeight());
+        float drawWidth = source.getWidth() * scale;
+        float drawHeight = source.getHeight() * scale;
+        Rect dst = new Rect(Math.round((width - drawWidth) * 0.5f),
+                Math.round((height - drawHeight) * 0.5f),
+                Math.round((width + drawWidth) * 0.5f),
+                Math.round((height + drawHeight) * 0.5f));
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        canvas.drawBitmap(source, null, dst, paint);
+        return output;
+    }
+
+    private LayerDrawable createFilterButtonBackground(Bitmap thumbnail, boolean selected) {
+        GradientDrawable fallback = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[] {Color.rgb(27, 37, 56), Color.rgb(10, 14, 22)});
+        fallback.setCornerRadius(dp(12));
+        fallback.setStroke(dp(1), Color.rgb(76, 96, 125));
+        if (thumbnail == null || thumbnail.isRecycled()) {
+            return new LayerDrawable(new android.graphics.drawable.Drawable[] {fallback});
+        }
+        BitmapDrawable image = new BitmapDrawable(getResources(), thumbnail);
+        image.setGravity(Gravity.CENTER);
+        image.setTileModeX(null);
+        image.setTileModeY(null);
+        GradientDrawable shade = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {Color.argb(36, 255, 255, 255), Color.argb(184, 2, 5, 10)});
+        shade.setCornerRadius(dp(12));
+        GradientDrawable stroke = new GradientDrawable();
+        stroke.setColor(Color.TRANSPARENT);
+        stroke.setCornerRadius(dp(12));
+        stroke.setStroke(dp(selected ? 2 : 1), selected ? Color.rgb(255, 255, 255)
+                : Color.argb(150, 110, 134, 166));
+        return new LayerDrawable(new android.graphics.drawable.Drawable[] {image, shade, stroke});
+    }
+
+    private void clearFilterThumbnailCache() {
+        for (Bitmap bitmap : filterThumbnailCache.values()) {
+            if (bitmap != null && !bitmap.isRecycled()) {
+                bitmap.recycle();
+            }
+        }
+        filterThumbnailCache.clear();
     }
 
     private TextView createSectionLabel(String text) {
@@ -2018,6 +2177,8 @@ public final class MainActivity extends Activity {
                     originalBitmap = scaled;
                     previewBitmap = scaled;
                     originalImageUri = uri;
+                    clearFilterThumbnailCache();
+                    presetStripScrollX = 0;
                     rebuildRenderSources();
                     renderVersion.incrementAndGet();
                     renderHandler.removeCallbacks(qualityRenderRunnable);
@@ -2395,6 +2556,7 @@ public final class MainActivity extends Activity {
                 current.put(copy);
             }
             preferences.edit().putString(KEY_CUSTOM_PRESETS, current.toString()).apply();
+            clearFilterThumbnailCache();
             renderControls();
             Toast.makeText(this, "已导入滤镜", Toast.LENGTH_SHORT).show();
         } catch (JSONException exception) {
@@ -2522,6 +2684,7 @@ public final class MainActivity extends Activity {
             preset.put("curves", curvesToJson(curves));
             presets.put(preset);
             preferences.edit().putString(KEY_CUSTOM_PRESETS, presets.toString()).apply();
+            clearFilterThumbnailCache();
             renderControls();
             Toast.makeText(this, "已保存滤镜", Toast.LENGTH_SHORT).show();
         } catch (JSONException exception) {
@@ -2582,6 +2745,7 @@ public final class MainActivity extends Activity {
             }
             presets.getJSONObject(index).put("name", name);
             preferences.edit().putString(KEY_CUSTOM_PRESETS, presets.toString()).apply();
+            clearFilterThumbnailCache();
             clearActiveFilter();
             renderControls();
             Toast.makeText(this, "已重命名", Toast.LENGTH_SHORT).show();
@@ -2598,6 +2762,7 @@ public final class MainActivity extends Activity {
             }
             presets.remove(index);
             preferences.edit().putString(KEY_CUSTOM_PRESETS, presets.toString()).apply();
+            clearFilterThumbnailCache();
             clearActiveFilter();
             renderControls();
             Toast.makeText(this, "已删除滤镜", Toast.LENGTH_SHORT).show();
@@ -2625,6 +2790,7 @@ public final class MainActivity extends Activity {
                 }
             }
             preferences.edit().putString(KEY_CUSTOM_PRESETS, reordered.toString()).apply();
+            clearFilterThumbnailCache();
             clearActiveFilter();
             renderControls();
             Toast.makeText(this, "已调整滤镜顺序", Toast.LENGTH_SHORT).show();
@@ -3308,6 +3474,22 @@ public final class MainActivity extends Activity {
             target.mixSaturation[i] = lerp(start.mixSaturation[i], end.mixSaturation[i], amount);
             target.mixLuminance[i] = lerp(start.mixLuminance[i], end.mixLuminance[i], amount);
         }
+        syncLegacyLocal(target);
+    }
+
+    private static void syncLegacyLocal(ColorAdjustments target) {
+        if (target.localCount <= 0) {
+            target.localEnabled = 0f;
+            return;
+        }
+        int index = Math.max(0, Math.min(target.activeLocalIndex, target.localCount - 1));
+        target.localEnabled = 1f;
+        target.localX = target.localXs[index];
+        target.localY = target.localYs[index];
+        target.localRadius = target.localRadii[index];
+        target.localFeather = target.localFeathers[index];
+        target.localExposure = target.localExposures[index];
+        target.localSaturation = target.localSaturations[index];
     }
 
     private static CurveSet mixCurves(CurveSet start, CurveSet end, float amount) {
