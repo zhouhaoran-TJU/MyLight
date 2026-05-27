@@ -19,12 +19,12 @@ final class HistogramView extends View {
 
     HistogramView(Context context) {
         super(context);
-        backgroundPaint.setColor(Color.argb(160, 10, 13, 19));
+        backgroundPaint.setColor(Color.argb(190, 8, 12, 20));
         backgroundPaint.setStyle(Paint.Style.FILL);
-        lumaPaint.setColor(Color.argb(170, 238, 243, 249));
-        redPaint.setColor(Color.argb(120, 237, 82, 82));
-        greenPaint.setColor(Color.argb(120, 91, 190, 117));
-        bluePaint.setColor(Color.argb(120, 88, 138, 239));
+        lumaPaint.setColor(Color.argb(190, 226, 246, 255));
+        redPaint.setColor(Color.argb(135, 255, 83, 120));
+        greenPaint.setColor(Color.argb(135, 77, 224, 163));
+        bluePaint.setColor(Color.argb(135, 89, 199, 255));
         setWillNotDraw(false);
     }
 

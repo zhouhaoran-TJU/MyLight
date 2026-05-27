@@ -29,19 +29,19 @@ final class CurveView extends View {
     CurveView(Context context, ToneCurve curve) {
         super(context);
         this.curve = curve;
-        setBackgroundColor(Color.rgb(28, 31, 38));
-        gridPaint.setColor(Color.rgb(62, 68, 78));
+        setBackgroundColor(Color.rgb(9, 14, 22));
+        gridPaint.setColor(Color.argb(130, 71, 94, 123));
         gridPaint.setStrokeWidth(1f);
-        curvePaint.setColor(Color.rgb(95, 179, 243));
+        curvePaint.setColor(Color.rgb(89, 199, 255));
         curvePaint.setStrokeWidth(dp(2));
         curvePaint.setStyle(Paint.Style.STROKE);
         curvePaint.setStrokeCap(Paint.Cap.ROUND);
         curvePaint.setStrokeJoin(Paint.Join.ROUND);
         pointPaint.setColor(Color.WHITE);
         pointPaint.setStyle(Paint.Style.FILL);
-        activePointPaint.setColor(Color.rgb(95, 179, 243));
+        activePointPaint.setColor(Color.rgb(89, 199, 255));
         activePointPaint.setStyle(Paint.Style.FILL);
-        labelPaint.setColor(Color.rgb(232, 238, 246));
+        labelPaint.setColor(Color.rgb(221, 241, 255));
         labelPaint.setTextSize(dp(12));
         labelPaint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         setMinimumHeight(dp(220));
@@ -91,8 +91,12 @@ final class CurveView extends View {
 
         for (int i = 0; i < curve.pointCount(); i++) {
             Paint paint = i == activePoint || i == selectedPoint ? activePointPaint : pointPaint;
+            if (i == activePoint || i == selectedPoint) {
+                pointPaint.setShadowLayer(dp(8), 0, 0, curvePaint.getColor());
+            }
             canvas.drawCircle(toScreenX(curve.getX(i), left, right),
                     toScreenY(curve.getY(i), top, bottom), dp((i == activePoint || i == selectedPoint) ? 8 : 7), paint);
+            pointPaint.clearShadowLayer();
         }
         if (selectedPoint >= 0 && selectedPoint < curve.pointCount()) {
             String label = curve.getX(selectedPoint) + " / " + curve.getY(selectedPoint);

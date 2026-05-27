@@ -135,6 +135,7 @@ public final class MainActivity extends Activity {
     private HistogramView histogramView;
     private TextView compareLabel;
     private TextView messageBar;
+    private TextView statusPill;
     private final Runnable qualityRenderRunnable = () -> renderPreview(false);
     private SharedPreferences preferences;
     private boolean renderInFlight;
@@ -227,7 +228,8 @@ public final class MainActivity extends Activity {
     private View createContentView() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(10, 12, 16));
+        setGradientBackground(root, Color.rgb(7, 10, 15), Color.rgb(14, 20, 31),
+                GradientDrawable.Orientation.TOP_BOTTOM);
 
         root.addView(createToolbar(), new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(56)));
@@ -260,8 +262,15 @@ public final class MainActivity extends Activity {
 
     private View createImageFrame() {
         FrameLayout imageFrame = new FrameLayout(this);
-        imageFrame.setBackgroundColor(Color.rgb(6, 7, 10));
+        setGradientBackground(imageFrame, Color.rgb(5, 7, 12), Color.rgb(17, 24, 36),
+                GradientDrawable.Orientation.TL_BR);
         imageView = new GpuImageView(this);
+        GradientDrawable imageChrome = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {Color.rgb(10, 13, 20), Color.rgb(4, 6, 10)});
+        imageChrome.setStroke(dp(1), Color.rgb(35, 48, 68));
+        imageChrome.setCornerRadius(dp(12));
+        imageView.setBackground(imageChrome);
+        imageView.setElevation(dp(8));
         imageView.setImageBitmap(previewBitmap);
         imageView.setOnTouchListener((view, event) -> handlePreviewTouch(event));
         imageFrame.addView(imageView, new FrameLayout.LayoutParams(
@@ -310,6 +319,7 @@ public final class MainActivity extends Activity {
         compareLabel.setPadding(dp(12), 0, dp(12), 0);
         GradientDrawable compareBackground = new GradientDrawable();
         compareBackground.setColor(Color.argb(190, 14, 18, 25));
+        compareBackground.setStroke(dp(1), Color.rgb(89, 199, 255));
         compareBackground.setCornerRadius(dp(14));
         compareLabel.setBackground(compareBackground);
         compareLabel.setVisibility(View.GONE);
@@ -317,7 +327,23 @@ public final class MainActivity extends Activity {
                 Gravity.LEFT | Gravity.TOP);
         compareParams.setMargins(dp(14), dp(14), 0, 0);
         imageFrame.addView(compareLabel, compareParams);
+        statusPill = new TextView(this);
+        statusPill.setTextColor(Color.rgb(226, 246, 255));
+        statusPill.setTextSize(11f);
+        statusPill.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        statusPill.setGravity(Gravity.CENTER);
+        statusPill.setPadding(dp(10), 0, dp(10), 0);
+        GradientDrawable statusBackground = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[] {Color.argb(210, 18, 31, 46), Color.argb(210, 20, 52, 68)});
+        statusBackground.setStroke(dp(1), Color.rgb(89, 199, 255));
+        statusBackground.setCornerRadius(dp(13));
+        statusPill.setBackground(statusBackground);
+        FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, dp(28), Gravity.LEFT | Gravity.BOTTOM);
+        statusParams.setMargins(dp(14), 0, 0, dp(14));
+        imageFrame.addView(statusPill, statusParams);
         imageFrame.setOnTouchListener((view, event) -> handlePreviewTouch(event));
+        updateStatusPill();
         return imageFrame;
     }
 
@@ -469,6 +495,7 @@ public final class MainActivity extends Activity {
         whiteBalancePickMode = true;
         localPickMode = false;
         renderControls();
+        updateStatusPill();
         Toast.makeText(this, "点一下图片中的灰白区域", Toast.LENGTH_SHORT).show();
     }
 
@@ -477,6 +504,7 @@ public final class MainActivity extends Activity {
         localPickMode = true;
         whiteBalancePickMode = false;
         renderControls();
+        updateStatusPill();
         Toast.makeText(this, "点一下图片设置局部调整中心", Toast.LENGTH_SHORT).show();
     }
 
@@ -657,13 +685,13 @@ public final class MainActivity extends Activity {
     private View createControlPanel(boolean landscape) {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        setGradientBackground(panel, Color.rgb(16, 20, 28), Color.rgb(11, 14, 20),
+        setGradientBackground(panel, Color.rgb(18, 24, 38), Color.rgb(7, 10, 16),
                 GradientDrawable.Orientation.TOP_BOTTOM);
         panel.setPadding(landscape ? dp(10) : 0, 0, landscape ? dp(10) : 0, 0);
         panelTabs = new LinearLayout(this);
         panelTabs.setOrientation(LinearLayout.HORIZONTAL);
         panelTabs.setPadding(dp(12), dp(10), dp(12), dp(10));
-        setGradientBackground(panelTabs, Color.rgb(20, 25, 34), Color.rgb(13, 17, 24),
+        setGradientBackground(panelTabs, Color.rgb(18, 26, 40), Color.rgb(10, 14, 22),
                 GradientDrawable.Orientation.LEFT_RIGHT);
         panel.addView(panelTabs, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(62)));
@@ -671,11 +699,11 @@ public final class MainActivity extends Activity {
 
         controlScroll = new ScrollView(this);
         controlScroll.setFillViewport(false);
-        controlScroll.setBackgroundColor(Color.rgb(14, 18, 25));
+        controlScroll.setBackgroundColor(Color.rgb(10, 14, 22));
         controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setPadding(dp(18), dp(12), dp(18), landscape ? dp(28) : dp(24));
-        controls.setBackgroundColor(Color.rgb(14, 18, 25));
+        controls.setBackgroundColor(Color.rgb(10, 14, 22));
         controlScroll.addView(controls);
         panel.addView(controlScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -692,7 +720,7 @@ public final class MainActivity extends Activity {
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.setPadding(dp(14), dp(7), dp(14), dp(7));
-        setGradientBackground(toolbar, Color.rgb(22, 27, 36), Color.rgb(12, 15, 21),
+        setGradientBackground(toolbar, Color.rgb(19, 31, 48), Color.rgb(7, 10, 16),
                 GradientDrawable.Orientation.LEFT_RIGHT);
 
         TextView title = new TextView(this);
@@ -830,6 +858,9 @@ public final class MainActivity extends Activity {
             rebuildPanelTabs();
             renderControls();
         });
+        if (selected) {
+            button.setElevation(dp(6));
+        }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1f);
         params.leftMargin = dp(4);
         params.rightMargin = dp(4);
@@ -1169,13 +1200,13 @@ public final class MainActivity extends Activity {
         Preset lastEdit = loadLastEditPreset();
         if (lastEdit != null) {
             Button button = createPresetButton("上次修改\n记忆", true, lastEdit);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(112), dp(62));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(118), dp(70));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
         Button saveFilterButton = createButton("存为滤镜\n当前", true);
         saveFilterButton.setOnClickListener(v -> showSaveFilterDialog());
-        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(112), dp(62));
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(118), dp(70));
         saveParams.rightMargin = dp(8);
         row.addView(saveFilterButton, saveParams);
         for (Preset preset : Preset.defaults()) {
@@ -1184,7 +1215,7 @@ public final class MainActivity extends Activity {
                 Toast.makeText(this, "默认滤镜不可管理，可保存为自定义滤镜", Toast.LENGTH_SHORT).show();
                 return true;
             });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(96), dp(62));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(104), dp(70));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
@@ -1197,7 +1228,7 @@ public final class MainActivity extends Activity {
                 showCustomPresetMenu(index, preset.name);
                 return true;
             });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(108), dp(62));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(114), dp(70));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
@@ -1209,6 +1240,7 @@ public final class MainActivity extends Activity {
         Button button = createButton(label, selected || isActiveFilter(preset));
         button.setOnClickListener(v -> applyPreset(preset));
         button.setGravity(Gravity.CENTER);
+        button.setTextSize(11f);
         return button;
     }
 
@@ -1218,8 +1250,8 @@ public final class MainActivity extends Activity {
 
     private TextView createSectionLabel(String text) {
         TextView label = new TextView(this);
-        label.setText(text);
-        label.setTextColor(Color.rgb(238, 243, 249));
+        label.setText("▌ " + text);
+        label.setTextColor(Color.rgb(221, 241, 255));
         label.setTextSize(14f);
         label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         label.setGravity(Gravity.CENTER_VERTICAL);
@@ -1293,9 +1325,9 @@ public final class MainActivity extends Activity {
         SeekBar seekBar = new SeekBar(this);
         seekBar.setMax(200);
         seekBar.setProgressTintList(ColorStateList.valueOf(sliderAccent));
-        seekBar.setThumbTintList(ColorStateList.valueOf(Color.rgb(232, 244, 255)));
-        seekBar.setProgressBackgroundTintList(ColorStateList.valueOf(blend(Color.rgb(43, 50, 62),
-                sliderAccent, 0.16f)));
+        seekBar.setThumbTintList(ColorStateList.valueOf(Color.rgb(241, 250, 255)));
+        seekBar.setProgressBackgroundTintList(ColorStateList.valueOf(blend(Color.rgb(28, 37, 55),
+                sliderAccent, 0.2f)));
         seekBar.setSplitTrack(false);
         sliderRow.addView(seekBar, new LinearLayout.LayoutParams(0, dp(42), 1f));
 
@@ -1312,14 +1344,16 @@ public final class MainActivity extends Activity {
         valueInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
         valueInput.setPadding(dp(4), 0, dp(4), 0);
         GradientDrawable inputBackground = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {Color.rgb(28, 34, 44), Color.rgb(17, 21, 29)});
-        inputBackground.setStroke(dp(1), blend(Color.rgb(68, 78, 95), sliderAccent, 0.28f));
-        inputBackground.setCornerRadius(dp(8));
+                new int[] {blend(Color.rgb(12, 17, 27), sliderAccent, 0.18f),
+                        Color.rgb(7, 10, 16)});
+        inputBackground.setStroke(dp(1), blend(Color.rgb(83, 105, 135), sliderAccent, 0.48f));
+        inputBackground.setCornerRadius(dp(10));
         valueInput.setBackground(inputBackground);
         sliderRow.addView(valueInput, new LinearLayout.LayoutParams(dp(58), dp(36)));
 
         Button resetButton = createButton("0", false, Color.rgb(232, 162, 80));
-        sliderRow.addView(resetButton, new LinearLayout.LayoutParams(dp(38), dp(34)));
+        resetButton.setTextSize(11f);
+        sliderRow.addView(resetButton, new LinearLayout.LayoutParams(dp(34), dp(34)));
 
         SliderBinding binding = new SliderBinding(seekBar, initialValue, min, max);
         sliderBindings.add(binding);
@@ -1559,7 +1593,29 @@ public final class MainActivity extends Activity {
         imageView.updateState(previewGeometry(), adjustments, curves, previewDisplayAspect(),
                 clippingWarningEnabled, compareSliderMode, compareSplit);
         updateLocalOverlay();
+        updateStatusPill();
         updateHistogramAsync();
+    }
+
+    private void updateStatusPill() {
+        if (statusPill == null) {
+            return;
+        }
+        StringBuilder status = new StringBuilder("GPU 实时");
+        if (adjustPanelsHaveChanges() || panelHasChanges(PANEL_FILTER)
+                || panelHasChanges(PANEL_CURVE) || panelHasChanges(PANEL_SIZE)) {
+            status.append("  ·  已修改");
+        }
+        if (clippingWarningEnabled) {
+            status.append("  ·  裁切警告");
+        }
+        if (compareSliderMode) {
+            status.append("  ·  滑杆对比");
+        }
+        if (whiteBalancePickMode || localPickMode) {
+            status.append("  ·  点选模式");
+        }
+        statusPill.setText(status.toString());
     }
 
     private void showHistoryDialog() {
@@ -2741,7 +2797,7 @@ public final class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(text);
         button.setTextSize(12f);
-        button.setTextColor(selected ? Color.WHITE : blend(Color.rgb(226, 232, 240), accent, 0.18f));
+        button.setTextColor(selected ? Color.WHITE : blend(Color.rgb(218, 230, 243), accent, 0.24f));
         button.setAllCaps(false);
         button.setMinHeight(0);
         button.setMinWidth(0);
@@ -2749,46 +2805,46 @@ public final class MainActivity extends Activity {
         GradientDrawable background = new GradientDrawable();
         if (selected) {
             background.setOrientation(GradientDrawable.Orientation.LEFT_RIGHT);
-            background.setColors(new int[] {blend(Color.rgb(18, 22, 29), accent, 0.62f),
-                    blend(Color.rgb(18, 22, 29), accent, 0.9f)});
+            background.setColors(new int[] {blend(Color.rgb(12, 18, 28), accent, 0.55f),
+                    blend(Color.rgb(18, 29, 45), accent, 0.92f)});
         } else {
             background.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM);
-            background.setColors(new int[] {blend(Color.rgb(34, 40, 51), accent, 0.12f),
-                    blend(Color.rgb(20, 25, 33), accent, 0.06f)});
+            background.setColors(new int[] {blend(Color.rgb(26, 34, 51), accent, 0.16f),
+                    blend(Color.rgb(12, 17, 27), accent, 0.08f)});
         }
-        background.setStroke(dp(1), selected ? blend(Color.WHITE, accent, 0.5f)
-                : blend(Color.rgb(68, 78, 95), accent, 0.38f));
-        background.setCornerRadius(dp(10));
+        background.setStroke(dp(1), selected ? blend(Color.WHITE, accent, 0.42f)
+                : blend(Color.rgb(54, 70, 93), accent, 0.42f));
+        background.setCornerRadius(dp(12));
         button.setBackground(background);
         return button;
     }
 
     private int semanticAccent(String text) {
         if (text.contains("保存") || text.contains("完成")) {
-            return Color.rgb(73, 188, 129);
+            return Color.rgb(77, 224, 163);
         }
         if (text.contains("重置") || text.contains("归零")) {
-            return Color.rgb(232, 162, 80);
+            return Color.rgb(255, 180, 92);
         }
         if (text.contains("滤镜") || text.contains("上次") || text.contains("Clean")
                 || text.contains("Film") || text.contains("Mono")) {
-            return Color.rgb(142, 128, 255);
+            return Color.rgb(164, 128, 255);
         }
         if (text.contains("左转") || text.contains("右转") || text.contains("裁剪")
                 || text.contains("尺寸")) {
-            return Color.rgb(84, 197, 210);
+            return Color.rgb(72, 223, 226);
         }
         if (text.contains("色彩") || text.contains("红") || text.contains("橙") || text.contains("黄")
                 || text.contains("绿") || text.contains("青") || text.contains("蓝") || text.contains("紫")) {
-            return Color.rgb(101, 196, 122);
+            return Color.rgb(237, 92, 186);
         }
         if (text.contains("曲线")) {
-            return Color.rgb(95, 179, 243);
+            return Color.rgb(89, 199, 255);
         }
         if (text.contains("效果")) {
-            return Color.rgb(212, 126, 214);
+            return Color.rgb(90, 230, 190);
         }
-        return Color.rgb(95, 179, 243);
+        return Color.rgb(89, 199, 255);
     }
 
     private int hslColor(int channel) {
@@ -2841,33 +2897,42 @@ public final class MainActivity extends Activity {
 
     private int sliderAccent(String label) {
         if (label.contains("高光") || label.contains("曝光") || label.contains("明亮")) {
-            return Color.rgb(112, 188, 255);
+            return Color.rgb(255, 196, 86);
         }
         if (label.contains("阴影") || label.contains("对比") || label.contains("去模糊")) {
-            return Color.rgb(139, 152, 170);
+            return Color.rgb(89, 199, 255);
         }
         if (label.contains("饱和")) {
-            return Color.rgb(236, 110, 157);
+            return Color.rgb(255, 83, 178);
         }
         if (label.contains("色温")) {
-            return Color.rgb(242, 163, 74);
+            return Color.rgb(255, 176, 83);
         }
         if (label.contains("色调")) {
-            return Color.rgb(203, 108, 231);
+            return Color.rgb(201, 108, 255);
         }
         if (label.contains("色相")) {
             return hslColor(activeMixChannel);
         }
         if (label.contains("滤镜")) {
-            return Color.rgb(167, 139, 250);
+            return Color.rgb(164, 128, 255);
+        }
+        if (label.contains("局部")) {
+            return Color.rgb(90, 230, 190);
         }
         if (label.contains("裁剪") || label.contains("旋转")) {
-            return Color.rgb(84, 197, 210);
+            return Color.rgb(72, 223, 226);
         }
         if (label.contains("晕影") || label.contains("氛围") || label.contains("褪色")) {
-            return Color.rgb(216, 128, 218);
+            return Color.rgb(90, 230, 190);
         }
-        return Color.rgb(95, 179, 243);
+        if (label.contains("局部")) {
+            return Color.rgb(90, 230, 190);
+        }
+        if (label.contains("锐化") || label.contains("降噪") || label.contains("颗粒")) {
+            return Color.rgb(184, 117, 255);
+        }
+        return Color.rgb(89, 199, 255);
     }
 
     private void setGradientBackground(View view, int startColor, int endColor,
@@ -2892,6 +2957,7 @@ public final class MainActivity extends Activity {
             histogramView.setVisibility(activePanel == PANEL_SIZE ? View.GONE : View.VISIBLE);
         }
         updateLocalOverlay();
+        updateStatusPill();
     }
 
     private void updateLocalOverlay() {

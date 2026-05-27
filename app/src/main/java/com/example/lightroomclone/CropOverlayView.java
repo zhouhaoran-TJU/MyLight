@@ -52,13 +52,13 @@ final class CropOverlayView extends View {
         super(context);
         this.geometry = geometry;
         setWillNotDraw(false);
-        dimPaint.setColor(Color.argb(115, 0, 0, 0));
-        borderPaint.setColor(Color.rgb(232, 245, 255));
+        dimPaint.setColor(Color.argb(145, 0, 0, 0));
+        borderPaint.setColor(Color.rgb(72, 223, 226));
         borderPaint.setStrokeWidth(dp(2));
         borderPaint.setStyle(Paint.Style.STROKE);
-        gridPaint.setColor(Color.argb(132, 232, 245, 255));
+        gridPaint.setColor(Color.argb(88, 200, 244, 255));
         gridPaint.setStrokeWidth(dp(1));
-        handlePaint.setColor(Color.rgb(111, 196, 255));
+        handlePaint.setColor(Color.rgb(77, 224, 216));
         handlePaint.setStyle(Paint.Style.FILL);
     }
 

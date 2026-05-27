@@ -38,12 +38,14 @@ final class LocalAdjustOverlayView extends View {
             float cy = (adjustments.localCount > 0 ? adjustments.localYs[i] : adjustments.localY) * height;
             float radius = (adjustments.localCount > 0 ? adjustments.localRadii[i] : adjustments.localRadius) * base;
             float feather = (adjustments.localCount > 0 ? adjustments.localFeathers[i] : adjustments.localFeather);
-            strokePaint.setColor(active ? Color.rgb(92, 200, 255) : Color.argb(190, 238, 244, 255));
+            strokePaint.setColor(active ? Color.rgb(90, 230, 190) : Color.rgb(89, 199, 255));
             strokePaint.setAlpha(active ? 235 : 150);
+            strokePaint.setShadowLayer(dp(8), 0, 0, strokePaint.getColor());
             canvas.drawCircle(cx, cy, radius, strokePaint);
             strokePaint.setAlpha(active ? 150 : 90);
             canvas.drawCircle(cx, cy, radius * Math.max(0.1f, 1f - feather), strokePaint);
-            fillPaint.setColor(active ? Color.rgb(92, 200, 255) : Color.WHITE);
+            strokePaint.clearShadowLayer();
+            fillPaint.setColor(active ? Color.rgb(90, 230, 190) : Color.WHITE);
             fillPaint.setAlpha(active ? 230 : 150);
             canvas.drawCircle(cx, cy, dp(active ? 6 : 4), fillPaint);
         }
