@@ -25,6 +25,7 @@ final class CurveView extends View {
     private Listener listener;
     private int activePoint = -1;
     private int selectedPoint = -1;
+    private boolean editingEnabled;
 
     CurveView(Context context, ToneCurve curve) {
         super(context);
@@ -60,6 +61,11 @@ final class CurveView extends View {
     void setCurveColor(int color) {
         curvePaint.setColor(color);
         activePointPaint.setColor(color);
+        invalidate();
+    }
+
+    void setEditingEnabled(boolean editingEnabled) {
+        this.editingEnabled = editingEnabled;
         invalidate();
     }
 
@@ -101,11 +107,16 @@ final class CurveView extends View {
         if (selectedPoint >= 0 && selectedPoint < curve.pointCount()) {
             String label = curve.getX(selectedPoint) + " / " + curve.getY(selectedPoint);
             canvas.drawText(label, left + dp(8), top + dp(18), labelPaint);
+        } else if (!editingEnabled) {
+            canvas.drawText("点击「调整」后编辑曲线", left + dp(8), top + dp(18), labelPaint);
         }
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (!editingEnabled) {
+            return false;
+        }
         float left = dp(14);
         float top = dp(12);
         float right = getWidth() - dp(14);

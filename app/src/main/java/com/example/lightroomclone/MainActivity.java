@@ -128,6 +128,7 @@ public final class MainActivity extends Activity {
     private int activeAdjustPanel = PANEL_LIGHT;
     private int activeCurveChannel = CurveSet.LUMINANCE;
     private int activeMixChannel = ColorAdjustments.MIX_RED;
+    private boolean curveEditMode;
     private int cropGridMode = CropOverlayView.GRID_THIRDS;
     private CurveView curveView;
     private CropOverlayView cropOverlayView;
@@ -265,12 +266,6 @@ public final class MainActivity extends Activity {
         setGradientBackground(imageFrame, Color.rgb(5, 7, 12), Color.rgb(17, 24, 36),
                 GradientDrawable.Orientation.TL_BR);
         imageView = new GpuImageView(this);
-        GradientDrawable imageChrome = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {Color.rgb(10, 13, 20), Color.rgb(4, 6, 10)});
-        imageChrome.setStroke(dp(1), Color.rgb(35, 48, 68));
-        imageChrome.setCornerRadius(dp(12));
-        imageView.setBackground(imageChrome);
-        imageView.setElevation(dp(8));
         imageView.setImageBitmap(previewBitmap);
         imageView.setOnTouchListener((view, event) -> handlePreviewTouch(event));
         imageFrame.addView(imageView, new FrameLayout.LayoutParams(
@@ -1103,6 +1098,7 @@ public final class MainActivity extends Activity {
 
         curveView = new CurveView(this, curves.curveFor(activeCurveChannel));
         curveView.setCurveColor(curveColor(activeCurveChannel));
+        curveView.setEditingEnabled(curveEditMode);
         curveView.setListener(new CurveView.Listener() {
             @Override
             public void onCurveStarted() {
@@ -1123,7 +1119,21 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(220)));
 
         LinearLayout curveActions = createButtonRow();
+        addModeButton(curveActions, curveEditMode ? "完成" : "调整", curveEditMode, () -> {
+            curveEditMode = !curveEditMode;
+            if (curveView != null) {
+                curveView.setEditingEnabled(curveEditMode);
+            }
+            if (!curveEditMode) {
+                renderPreview(false);
+            }
+            renderControls();
+        });
         addModeButton(curveActions, "删除锚点", false, () -> {
+            if (!curveEditMode) {
+                Toast.makeText(this, "请先点击「调整」", Toast.LENGTH_SHORT).show();
+                return;
+            }
             if (curveView == null || !curveView.hasDeletableSelection()) {
                 Toast.makeText(this, "请选择可删除的中间锚点", Toast.LENGTH_SHORT).show();
                 return;
