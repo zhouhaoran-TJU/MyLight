@@ -1,0 +1,6 @@
+{
+  "versionCode": 2,
+  "versionName": "1.1-beta",
+  "apkUrl": "https://github.com/zhouhaoran-TJU/MyLight/raw/main/dist/MyLight-beta.apk",
+  "notes": "新增更新检查、自动下载安装包入口和意见反馈入口。"
+}

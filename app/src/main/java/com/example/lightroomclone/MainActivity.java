@@ -34,6 +34,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.text.InputType;
 import android.util.Base64;
 import android.view.Gravity;
@@ -65,6 +66,9 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.File;
+import java.net.HttpURLConnection;
+import java.net.URLEncoder;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
@@ -103,6 +107,10 @@ public final class MainActivity extends Activity {
     private static final String KEY_EXPORT_SIZE = "export_size";
     private static final String EXPORT_FOLDER = "MyLight";
     private static final String SESSION_IMAGE_NAME = "last_session.jpg";
+    private static final String UPDATE_INFO_URL =
+            "https://raw.githubusercontent.com/zhouhaoran-TJU/MyLight/main/dist/version.json";
+    private static final String FEEDBACK_URL =
+            "https://github.com/zhouhaoran-TJU/MyLight/issues/new";
     private static final int MAX_UNDO_STEPS = 30;
 
     private static final int PANEL_FILTER = 0;
@@ -841,6 +849,8 @@ public final class MainActivity extends Activity {
                 .setItems(new String[] {
                         "历史记录",
                         "一键优化",
+                        "检查更新",
+                        "意见反馈",
                         "导出设置",
                         compareSliderMode ? "关闭滑杆对比" : "开启滑杆对比",
                         clippingWarningEnabled ? "关闭裁切警告" : "开启裁切警告",
@@ -861,32 +871,36 @@ public final class MainActivity extends Activity {
                     } else if (which == 1) {
                         autoEnhance();
                     } else if (which == 2) {
-                        showExportSettingsDialog();
+                        checkForUpdates(true);
                     } else if (which == 3) {
+                        showFeedbackDialog();
+                    } else if (which == 4) {
+                        showExportSettingsDialog();
+                    } else if (which == 5) {
                         compareSliderMode = !compareSliderMode;
                         renderPreview(false);
-                    } else if (which == 4) {
+                    } else if (which == 6) {
                         clippingWarningEnabled = !clippingWarningEnabled;
                         renderPreview(false);
-                    } else if (which == 5) {
-                        openBatchImages();
-                    } else if (which == 6) {
-                        exportBatchImages();
                     } else if (which == 7) {
-                        showImportFiltersDialog();
+                        openBatchImages();
                     } else if (which == 8) {
-                        showExportFiltersDialog();
+                        exportBatchImages();
                     } else if (which == 9) {
-                        saveDraft();
+                        showImportFiltersDialog();
                     } else if (which == 10) {
-                        showDraftsDialog();
+                        showExportFiltersDialog();
                     } else if (which == 11) {
-                        copyPresetShareCode();
+                        saveDraft();
                     } else if (which == 12) {
-                        showImportShareCodeDialog();
+                        showDraftsDialog();
                     } else if (which == 13) {
-                        resetAll();
+                        copyPresetShareCode();
                     } else if (which == 14) {
+                        showImportShareCodeDialog();
+                    } else if (which == 15) {
+                        resetAll();
+                    } else if (which == 16) {
                         previewZoom = 1f;
                         previewPanX = 0f;
                         previewPanY = 0f;
@@ -896,6 +910,157 @@ public final class MainActivity extends Activity {
                     }
                 })
                 .show();
+    }
+
+    private void checkForUpdates(boolean manual) {
+        Toast.makeText(this, "正在检查更新", Toast.LENGTH_SHORT).show();
+        renderExecutor.execute(() -> {
+            try {
+                JSONObject info = new JSONObject(readUrl(UPDATE_INFO_URL));
+                int latestCode = info.optInt("versionCode", 0);
+                String latestName = info.optString("versionName", "");
+                String apkUrl = info.optString("apkUrl", "");
+                String notes = info.optString("notes", "");
+                int currentCode = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+                runOnUiThread(() -> {
+                    if (latestCode > currentCode && !apkUrl.isEmpty()) {
+                        showUpdateDialog(latestName, notes, apkUrl);
+                    } else if (manual) {
+                        Toast.makeText(this, "当前已是最新版本", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } catch (Exception exception) {
+                runOnUiThread(() -> {
+                    if (manual) {
+                        Toast.makeText(this, "更新检查失败", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        });
+    }
+
+    private void showUpdateDialog(String versionName, String notes, String apkUrl) {
+        String message = "发现新版本 " + versionName;
+        if (notes != null && !notes.trim().isEmpty()) {
+            message += "\n\n" + notes.trim();
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("MyLight 更新")
+                .setMessage(message)
+                .setNegativeButton("稍后", null)
+                .setPositiveButton("下载并安装", (dialog, which) -> downloadAndInstallUpdate(apkUrl))
+                .show();
+    }
+
+    private void downloadAndInstallUpdate(String apkUrl) {
+        ProgressDialog progressDialog = new ProgressDialog(this);
+        progressDialog.setMessage("正在下载更新包");
+        progressDialog.setIndeterminate(true);
+        progressDialog.setCancelable(false);
+        progressDialog.show();
+        renderExecutor.execute(() -> {
+            try {
+                File apkFile = new File(getExternalFilesDir(null), ApkProvider.APK_NAME);
+                downloadFile(apkUrl, apkFile);
+                runOnUiThread(() -> {
+                    progressDialog.dismiss();
+                    installDownloadedApk();
+                });
+            } catch (IOException exception) {
+                runOnUiThread(() -> {
+                    progressDialog.dismiss();
+                    Toast.makeText(this, "更新包下载失败", Toast.LENGTH_SHORT).show();
+                });
+            }
+        });
+    }
+
+    private void installDownloadedApk() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+            Intent settingsIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName()));
+            Toast.makeText(this, "请允许 MyLight 安装更新", Toast.LENGTH_LONG).show();
+            startActivity(settingsIntent);
+            return;
+        }
+        Uri apkUri = Uri.parse("content://" + getPackageName() + ".apkprovider/" + ApkProvider.APK_NAME);
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
+    }
+
+    private String readUrl(String urlString) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(urlString).openConnection();
+        connection.setConnectTimeout(8000);
+        connection.setReadTimeout(8000);
+        try (InputStream inputStream = connection.getInputStream()) {
+            return readText(inputStream);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private String readText(InputStream inputStream) throws IOException {
+        byte[] buffer = new byte[4096];
+        StringBuilder builder = new StringBuilder();
+        int count;
+        while ((count = inputStream.read(buffer)) >= 0) {
+            builder.append(new String(buffer, 0, count, "UTF-8"));
+        }
+        return builder.toString();
+    }
+
+    private void downloadFile(String urlString, File output) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) new URL(urlString).openConnection();
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(20000);
+        try (InputStream inputStream = connection.getInputStream();
+                FileOutputStream outputStream = new FileOutputStream(output)) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = inputStream.read(buffer)) >= 0) {
+                outputStream.write(buffer, 0, count);
+            }
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private void showFeedbackDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(18), dp(8), dp(18), 0);
+        EditText input = new EditText(this);
+        input.setMinLines(5);
+        input.setGravity(Gravity.TOP | Gravity.LEFT);
+        input.setHint("请描述你的建议、问题或希望优化的功能");
+        layout.addView(input, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        new AlertDialog.Builder(this)
+                .setTitle("意见反馈")
+                .setView(layout)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("提交", (dialog, which) -> submitFeedback(input.getText().toString()))
+                .show();
+    }
+
+    private void submitFeedback(String feedback) {
+        String clean = feedback == null ? "" : feedback.trim();
+        if (clean.isEmpty()) {
+            Toast.makeText(this, "请先输入反馈内容", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            String title = URLEncoder.encode("用户反馈", "UTF-8");
+            String body = URLEncoder.encode(clean + "\n\nApp: MyLight "
+                    + getPackageManager().getPackageInfo(getPackageName(), 0).versionName, "UTF-8");
+            Intent intent = new Intent(Intent.ACTION_VIEW,
+                    Uri.parse(FEEDBACK_URL + "?title=" + title + "&body=" + body));
+            startActivity(intent);
+        } catch (Exception exception) {
+            Toast.makeText(this, "反馈提交失败", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void rebuildPanelTabs() {
