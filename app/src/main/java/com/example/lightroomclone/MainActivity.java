@@ -176,6 +176,7 @@ public final class MainActivity extends Activity {
     private boolean localDraggingRadius;
     private boolean autoOpenAttempted;
     private boolean restoringSession;
+    private boolean userExiting;
     private float compareSplit = 0.5f;
     private int exportQuality = 95;
     private int exportSizeMode;
@@ -232,11 +233,20 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (userExiting) {
+            clearSavedSession();
+        }
         renderExecutor.shutdownNow();
         renderHandler.removeCallbacksAndMessages(null);
         recycleRenderSources();
         clearFilterThumbnailCache();
         super.onDestroy();
+    }
+
+    @Override
+    public void onBackPressed() {
+        userExiting = true;
+        super.onBackPressed();
     }
 
     @Override
@@ -2437,6 +2447,16 @@ public final class MainActivity extends Activity {
         }
         originalImageUri = null;
         restoringSession = false;
+    }
+
+    private void clearSavedSession() {
+        if (preferences != null) {
+            preferences.edit()
+                    .remove(KEY_LAST_IMAGE_URI)
+                    .remove(KEY_LAST_EDIT)
+                    .apply();
+        }
+        clearSavedSessionImage();
     }
 
     private File sessionImageFile() {
