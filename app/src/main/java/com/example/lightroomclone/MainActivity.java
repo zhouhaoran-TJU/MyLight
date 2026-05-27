@@ -21,7 +21,6 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Shader;
 import android.graphics.Typeface;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.ExifInterface;
 import android.net.Uri;
@@ -1210,24 +1209,7 @@ public final class MainActivity extends Activity {
         Button button = createButton(label, selected || isActiveFilter(preset));
         button.setOnClickListener(v -> applyPreset(preset));
         button.setGravity(Gravity.CENTER);
-        Bitmap thumbnail = createPresetThumbnail(preset);
-        BitmapDrawable drawable = new BitmapDrawable(getResources(), thumbnail);
-        drawable.setBounds(0, 0, dp(76), dp(28));
-        button.setCompoundDrawables(null, drawable, null, null);
-        button.setCompoundDrawablePadding(dp(3));
         return button;
-    }
-
-    private Bitmap createPresetThumbnail(Preset preset) {
-        Bitmap source = Bitmap.createScaledBitmap(originalBitmap, dp(76), dp(28), true);
-        ColorAdjustments presetAdjustments = preset.adjustments.copy();
-        CurveSet presetCurves = preset.curves.copy();
-        Bitmap result = ImageProcessor.applyFastPreview(source, new GeometryAdjustments(),
-                presetAdjustments, presetCurves, 76, () -> false);
-        if (source != originalBitmap && !source.isRecycled()) {
-            source.recycle();
-        }
-        return result == null ? Bitmap.createBitmap(dp(76), dp(28), Bitmap.Config.ARGB_8888) : result;
     }
 
     private boolean isActiveFilter(Preset preset) {
@@ -1888,11 +1870,15 @@ public final class MainActivity extends Activity {
                     if (originalBitmap != null && originalBitmap != previewBitmap && !originalBitmap.isRecycled()) {
                         originalBitmap.recycle();
                     }
+                    if (previewBitmap != null && previewBitmap != originalBitmap && !previewBitmap.isRecycled()) {
+                        previewBitmap.recycle();
+                    }
                     originalBitmap = scaled;
+                    previewBitmap = scaled;
                     originalImageUri = uri;
                     rebuildRenderSources();
                     if (imageView != null) {
-                        imageView.setImageBitmap(scaled);
+                        imageView.setImageBitmap(previewBitmap);
                     }
                     if (cropOverlayView != null) {
                         cropOverlayView.setImageSize(scaled.getWidth(), scaled.getHeight());
