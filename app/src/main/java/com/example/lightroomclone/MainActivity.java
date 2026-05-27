@@ -105,6 +105,7 @@ public final class MainActivity extends Activity {
     private static final String KEY_DRAFTS = "drafts";
     private static final String KEY_EXPORT_QUALITY = "export_quality";
     private static final String KEY_EXPORT_SIZE = "export_size";
+    private static final String KEY_PRIVACY_ACCEPTED = "privacy_accepted";
     private static final String EXPORT_FOLDER = "MyLight";
     private static final String SESSION_IMAGE_NAME = "last_session.jpg";
     private static final String UPDATE_INFO_URL =
@@ -219,10 +220,35 @@ public final class MainActivity extends Activity {
         previewBitmap = originalBitmap;
         setContentView(createContentView());
         renderControls();
+        startAfterPrivacyAccepted();
+    }
+
+    private void startAfterPrivacyAccepted() {
+        if (preferences != null && !preferences.getBoolean(KEY_PRIVACY_ACCEPTED, false)) {
+            renderPreview();
+            showPrivacyDialog();
+            return;
+        }
         if (!restoreLastSession()) {
             renderPreview();
             openImageOnceAfterLaunch();
         }
+    }
+
+    private void showPrivacyDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("隐私与权限说明")
+                .setMessage("MyLight 会在你选择图片后读取相册图片用于本地编辑；会访问网络用于检查更新、下载更新包和提交反馈；保存图片时会写入系统相册。未同意前不会主动打开相册。")
+                .setCancelable(false)
+                .setNegativeButton("退出", (dialog, which) -> {
+                    userExiting = true;
+                    finish();
+                })
+                .setPositiveButton("同意并继续", (dialog, which) -> {
+                    preferences.edit().putBoolean(KEY_PRIVACY_ACCEPTED, true).apply();
+                    startAfterPrivacyAccepted();
+                })
+                .show();
     }
 
     @Override

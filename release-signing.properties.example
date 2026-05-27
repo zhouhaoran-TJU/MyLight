@@ -1,0 +1,4 @@
+storeFile=/absolute/path/to/mylight-release.keystore
+storePassword=change_me
+keyAlias=mylight
+keyPassword=change_me

@@ -1,6 +1,6 @@
 {
-  "versionCode": 4,
-  "versionName": "1.3-beta",
+  "versionCode": 5,
+  "versionName": "1.4-beta",
   "apkUrl": "https://github.com/zhouhaoran-TJU/MyLight/raw/main/dist/MyLight-beta.apk",
-  "notes": "区分后台保持和主动退出：进入后台保留当前编辑，主动退出后下次启动重新选择图片。"
+  "notes": "上架准备版：正式包名、隐私与权限弹窗、release 签名配置和应用市场资料。"
 }

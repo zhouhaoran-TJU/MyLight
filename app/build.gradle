@@ -3,19 +3,37 @@ plugins {
 }
 
 android {
-    namespace "com.example.lightroomclone"
+    namespace "com.zhouhaoran.mylight"
     compileSdk 33
     buildToolsVersion "33.0.2"
 
     defaultConfig {
-        applicationId "com.example.lightroomclone"
+        applicationId "com.zhouhaoran.mylight"
         minSdk 26
         targetSdk 33
-        versionCode 4
-        versionName "1.3"
+        versionCode 5
+        versionName "1.4"
+    }
+
+    signingConfigs {
+        release {
+            def props = new Properties()
+            def propsFile = rootProject.file("release-signing.properties")
+            if (propsFile.exists()) {
+                props.load(new FileInputStream(propsFile))
+                storeFile file(props["storeFile"])
+                storePassword props["storePassword"]
+                keyAlias props["keyAlias"]
+                keyPassword props["keyPassword"]
+            }
+        }
     }
 
     buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
         beta {
             initWith debug
             matchingFallbacks = ["debug"]
