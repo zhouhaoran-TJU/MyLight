@@ -12,7 +12,7 @@
         android:resizeableActivity="true"
         android:theme="@style/AppTheme">
         <activity
-            android:name=".MainActivity"
+            android:name="com.example.lightroomclone.MainActivity"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="true">
             <intent-filter>
@@ -21,7 +21,7 @@
             </intent-filter>
         </activity>
         <provider
-            android:name=".ApkProvider"
+            android:name="com.example.lightroomclone.ApkProvider"
             android:authorities="${applicationId}.apkprovider"
             android:exported="false"
             android:grantUriPermissions="true" />

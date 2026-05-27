@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace "com.zhouhaoran.mylight"
+    namespace "com.example.lightroomclone"
     compileSdk 33
     buildToolsVersion "33.0.2"
 
