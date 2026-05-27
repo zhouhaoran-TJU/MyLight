@@ -1,0 +1,61 @@
+name: Feedback triage
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect feedback issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              labels: "feedback",
+              state: "open",
+              per_page: 100
+            });
+            const feedback = issues.filter(issue => !issue.pull_request);
+            if (feedback.length === 0) {
+              core.info("No open feedback issues.");
+              return;
+            }
+            const today = new Date().toISOString().slice(0, 10);
+            const title = `反馈巡检 ${today}`;
+            const list = feedback.map(issue =>
+              `- #${issue.number} ${issue.title}\n  ${issue.html_url}`
+            ).join("\n");
+            const body = [
+              "## 待分析反馈",
+              list,
+              "",
+              "## Agent 处理要求",
+              "1. 逐条判断反馈是否合理、是否可复现、是否与现有产品方向一致。",
+              "2. 合理反馈需要给出优化方案，并按优先级实现。",
+              "3. 不合理或暂不处理的反馈，需要说明原因并在原 Issue 回复。",
+              "4. 实现后关联提交和新版 APK。"
+            ].join("\n");
+            const existing = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${owner}/${repo} is:issue is:open in:title "${title}"`
+            });
+            if (existing.data.total_count > 0) {
+              core.info("Today's triage issue already exists.");
+              return;
+            }
+            await github.rest.issues.create({
+              owner,
+              repo,
+              title,
+              body,
+              labels: ["feedback-triage"]
+            });

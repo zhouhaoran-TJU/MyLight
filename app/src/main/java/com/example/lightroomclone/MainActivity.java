@@ -1055,8 +1055,9 @@ public final class MainActivity extends Activity {
             String title = URLEncoder.encode("用户反馈", "UTF-8");
             String body = URLEncoder.encode(clean + "\n\nApp: MyLight "
                     + getPackageManager().getPackageInfo(getPackageName(), 0).versionName, "UTF-8");
+            String labels = URLEncoder.encode("feedback", "UTF-8");
             Intent intent = new Intent(Intent.ACTION_VIEW,
-                    Uri.parse(FEEDBACK_URL + "?title=" + title + "&body=" + body));
+                    Uri.parse(FEEDBACK_URL + "?title=" + title + "&body=" + body + "&labels=" + labels));
             startActivity(intent);
         } catch (Exception exception) {
             Toast.makeText(this, "反馈提交失败", Toast.LENGTH_SHORT).show();
