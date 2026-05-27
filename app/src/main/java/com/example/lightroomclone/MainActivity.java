@@ -247,7 +247,7 @@ public final class MainActivity extends Activity {
                 GradientDrawable.Orientation.TOP_BOTTOM);
 
         root.addView(createToolbar(), new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(56)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(50)));
 
         boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         if (landscape) {
@@ -265,7 +265,7 @@ public final class MainActivity extends Activity {
             root.addView(createImageFrame(), new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
             root.addView(createControlPanel(false), new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(348)));
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(318)));
         }
         messageBar = new TextView(this);
         messageBar.setTextColor(Color.WHITE);
@@ -322,9 +322,9 @@ public final class MainActivity extends Activity {
         imageFrame.addView(localOverlayView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         histogramView = new HistogramView(this);
-        FrameLayout.LayoutParams histogramParams = new FrameLayout.LayoutParams(dp(148), dp(82),
+        FrameLayout.LayoutParams histogramParams = new FrameLayout.LayoutParams(dp(136), dp(76),
                 Gravity.TOP | Gravity.RIGHT);
-        histogramParams.setMargins(0, dp(14), dp(14), 0);
+        histogramParams.setMargins(0, dp(12), dp(12), 0);
         imageFrame.addView(histogramView, histogramParams);
         histogramView.setOnClickListener(v -> toggleHistogram());
         compareLabel = new TextView(this);
@@ -340,24 +340,24 @@ public final class MainActivity extends Activity {
         compareBackground.setCornerRadius(dp(14));
         compareLabel.setBackground(compareBackground);
         compareLabel.setVisibility(View.GONE);
-        FrameLayout.LayoutParams compareParams = new FrameLayout.LayoutParams(dp(64), dp(30),
+        FrameLayout.LayoutParams compareParams = new FrameLayout.LayoutParams(dp(60), dp(28),
                 Gravity.LEFT | Gravity.TOP);
-        compareParams.setMargins(dp(14), dp(14), 0, 0);
+        compareParams.setMargins(dp(12), dp(12), 0, 0);
         imageFrame.addView(compareLabel, compareParams);
         statusPill = new TextView(this);
         statusPill.setTextColor(Color.rgb(226, 246, 255));
         statusPill.setTextSize(11f);
         statusPill.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         statusPill.setGravity(Gravity.CENTER);
-        statusPill.setPadding(dp(10), 0, dp(10), 0);
+        statusPill.setPadding(dp(9), 0, dp(9), 0);
         GradientDrawable statusBackground = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
                 new int[] {Color.argb(210, 18, 31, 46), Color.argb(210, 20, 52, 68)});
         statusBackground.setStroke(dp(1), Color.rgb(89, 199, 255));
         statusBackground.setCornerRadius(dp(13));
         statusPill.setBackground(statusBackground);
         FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, dp(28), Gravity.LEFT | Gravity.BOTTOM);
-        statusParams.setMargins(dp(14), 0, 0, dp(14));
+                FrameLayout.LayoutParams.WRAP_CONTENT, dp(26), Gravity.LEFT | Gravity.BOTTOM);
+        statusParams.setMargins(dp(12), 0, 0, dp(12));
         imageFrame.addView(statusPill, statusParams);
         imageFrame.setOnTouchListener((view, event) -> handlePreviewTouch(event));
         updateStatusPill();
@@ -733,14 +733,14 @@ public final class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         setGradientBackground(panel, Color.rgb(18, 24, 38), Color.rgb(7, 10, 16),
                 GradientDrawable.Orientation.TOP_BOTTOM);
-        panel.setPadding(landscape ? dp(10) : 0, 0, landscape ? dp(10) : 0, 0);
+        panel.setPadding(landscape ? dp(8) : 0, 0, landscape ? dp(8) : 0, 0);
         panelTabs = new LinearLayout(this);
         panelTabs.setOrientation(LinearLayout.HORIZONTAL);
-        panelTabs.setPadding(dp(12), dp(10), dp(12), dp(10));
+        panelTabs.setPadding(dp(12), dp(8), dp(12), dp(8));
         setGradientBackground(panelTabs, Color.rgb(18, 26, 40), Color.rgb(10, 14, 22),
                 GradientDrawable.Orientation.LEFT_RIGHT);
         panel.addView(panelTabs, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(62)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(54)));
         rebuildPanelTabs();
 
         controlScroll = new ScrollView(this);
@@ -748,7 +748,7 @@ public final class MainActivity extends Activity {
         controlScroll.setBackgroundColor(Color.rgb(10, 14, 22));
         controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
-        controls.setPadding(dp(18), dp(12), dp(18), landscape ? dp(28) : dp(24));
+        controls.setPadding(dp(16), dp(8), dp(16), landscape ? dp(24) : dp(18));
         controls.setBackgroundColor(Color.rgb(10, 14, 22));
         controlScroll.addView(controls);
         panel.addView(controlScroll, new LinearLayout.LayoutParams(
@@ -765,14 +765,14 @@ public final class MainActivity extends Activity {
     private View createToolbar() {
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        toolbar.setPadding(dp(14), dp(7), dp(14), dp(7));
+        toolbar.setPadding(dp(12), dp(5), dp(12), dp(5));
         setGradientBackground(toolbar, Color.rgb(19, 31, 48), Color.rgb(7, 10, 16),
                 GradientDrawable.Orientation.LEFT_RIGHT);
 
         TextView title = new TextView(this);
         title.setText("MyLight");
         title.setTextColor(Color.WHITE);
-        title.setTextSize(21f);
+        title.setTextSize(19f);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.addView(title, new LinearLayout.LayoutParams(0,
@@ -808,15 +808,15 @@ public final class MainActivity extends Activity {
     }
 
     private void addToolbarButton(LinearLayout row, Button button) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(54), dp(42));
-        params.leftMargin = dp(6);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(50), dp(38));
+        params.leftMargin = dp(5);
         row.addView(button, params);
     }
 
     private void addToolbarIconButton(LinearLayout row, Button button) {
-        button.setTextSize(18f);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(42), dp(42));
-        params.leftMargin = dp(6);
+        button.setTextSize(17f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(38), dp(38));
+        params.leftMargin = dp(5);
         row.addView(button, params);
     }
 
@@ -907,9 +907,9 @@ public final class MainActivity extends Activity {
         if (selected) {
             button.setElevation(dp(6));
         }
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1f);
-        params.leftMargin = dp(4);
-        params.rightMargin = dp(4);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        params.leftMargin = dp(3);
+        params.rightMargin = dp(3);
         panelTabs.addView(button, params);
     }
 
@@ -1258,11 +1258,11 @@ public final class MainActivity extends Activity {
         scrollView.setHorizontalScrollBarEnabled(false);
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(0, 0, 0, dp(10));
+        row.setPadding(0, 0, 0, dp(8));
         Preset lastEdit = loadLastEditPreset();
         if (lastEdit != null) {
             Button button = createPresetButton("上次修改\n记忆", true, lastEdit, "last");
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(124), dp(82));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(118), dp(76));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
@@ -1272,7 +1272,7 @@ public final class MainActivity extends Activity {
         saveFilterButton.setShadowLayer(dp(2), 0f, dp(1), Color.argb(190, 0, 0, 0));
         saveFilterButton.setElevation(dp(5));
         saveFilterButton.setOnClickListener(v -> showSaveFilterDialog());
-        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(124), dp(82));
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(118), dp(76));
         saveParams.rightMargin = dp(8);
         row.addView(saveFilterButton, saveParams);
         for (Preset preset : Preset.defaults()) {
@@ -1281,7 +1281,7 @@ public final class MainActivity extends Activity {
                 Toast.makeText(this, "默认滤镜不可管理，可保存为自定义滤镜", Toast.LENGTH_SHORT).show();
                 return true;
             });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(112), dp(82));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(108), dp(76));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
@@ -1294,7 +1294,7 @@ public final class MainActivity extends Activity {
                 showCustomPresetMenu(index, preset.name);
                 return true;
             });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(118), dp(82));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(112), dp(76));
             params.rightMargin = dp(8);
             row.addView(button, params);
         }
@@ -1427,7 +1427,7 @@ public final class MainActivity extends Activity {
     private LayerDrawable createFilterButtonBackground(Bitmap thumbnail, boolean selected) {
         GradientDrawable fallback = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[] {Color.rgb(27, 37, 56), Color.rgb(10, 14, 22)});
-        fallback.setCornerRadius(dp(12));
+        fallback.setCornerRadius(dp(8));
         fallback.setStroke(dp(1), Color.rgb(76, 96, 125));
         if (thumbnail == null || thumbnail.isRecycled()) {
             return new LayerDrawable(new Drawable[] {fallback});
@@ -1435,10 +1435,10 @@ public final class MainActivity extends Activity {
         Drawable image = new CoverBitmapDrawable(thumbnail);
         GradientDrawable shade = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {Color.argb(36, 255, 255, 255), Color.argb(184, 2, 5, 10)});
-        shade.setCornerRadius(dp(12));
+        shade.setCornerRadius(dp(8));
         GradientDrawable stroke = new GradientDrawable();
         stroke.setColor(Color.TRANSPARENT);
-        stroke.setCornerRadius(dp(12));
+        stroke.setCornerRadius(dp(8));
         stroke.setStroke(dp(selected ? 2 : 1), selected ? Color.rgb(255, 255, 255)
                 : Color.argb(150, 110, 134, 166));
         return new LayerDrawable(new Drawable[] {image, shade, stroke});
@@ -1457,10 +1457,10 @@ public final class MainActivity extends Activity {
         TextView label = new TextView(this);
         label.setText("▌ " + text);
         label.setTextColor(Color.rgb(221, 241, 255));
-        label.setTextSize(14f);
+        label.setTextSize(13f);
         label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         label.setGravity(Gravity.CENTER_VERTICAL);
-        label.setPadding(dp(2), dp(18), 0, dp(10));
+        label.setPadding(dp(2), dp(12), 0, dp(7));
         return label;
     }
 
@@ -1474,7 +1474,7 @@ public final class MainActivity extends Activity {
     private GridLayout createButtonGrid(int columns) {
         GridLayout grid = new GridLayout(this);
         grid.setColumnCount(columns);
-        grid.setPadding(0, 0, 0, dp(10));
+        grid.setPadding(0, 0, 0, dp(8));
         grid.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         return grid;
@@ -1484,7 +1484,7 @@ public final class MainActivity extends Activity {
         Button button = createButton(label, selected);
         button.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
         button.setOnClickListener(v -> action.run());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(40), 1f);
         params.leftMargin = dp(3);
         params.rightMargin = dp(3);
         row.addView(button, params);
@@ -1496,9 +1496,9 @@ public final class MainActivity extends Activity {
         button.setOnClickListener(v -> action.run());
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = 0;
-        params.height = dp(44);
+        params.height = dp(40);
         params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
-        params.setMargins(dp(3), dp(3), dp(3), dp(5));
+        params.setMargins(dp(3), dp(3), dp(3), dp(4));
         grid.addView(button, params);
     }
 
@@ -1517,14 +1517,19 @@ public final class MainActivity extends Activity {
         LinearLayout sliderRow = new LinearLayout(this);
         sliderRow.setOrientation(LinearLayout.HORIZONTAL);
         sliderRow.setGravity(Gravity.CENTER_VERTICAL);
-        sliderRow.setPadding(0, dp(4), 0, dp(8));
+        sliderRow.setPadding(dp(10), dp(5), dp(8), dp(5));
+        GradientDrawable rowBackground = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[] {Color.rgb(13, 18, 29), Color.rgb(9, 13, 21)});
+        rowBackground.setStroke(dp(1), Color.rgb(25, 35, 52));
+        rowBackground.setCornerRadius(dp(8));
+        sliderRow.setBackground(rowBackground);
 
         TextView nameLabel = new TextView(this);
         nameLabel.setText(label);
         nameLabel.setTextColor(floatChanged(initialValue) ? Color.WHITE : Color.rgb(202, 211, 224));
-        nameLabel.setTextSize(13f);
+        nameLabel.setTextSize(12f);
         nameLabel.setTypeface(Typeface.DEFAULT, floatChanged(initialValue) ? Typeface.BOLD : Typeface.NORMAL);
-        sliderRow.addView(nameLabel, new LinearLayout.LayoutParams(dp(70), dp(42)));
+        sliderRow.addView(nameLabel, new LinearLayout.LayoutParams(dp(66), dp(38)));
 
         int sliderAccent = sliderAccent(label);
         SeekBar seekBar = new SeekBar(this);
@@ -1534,11 +1539,11 @@ public final class MainActivity extends Activity {
         seekBar.setProgressBackgroundTintList(ColorStateList.valueOf(blend(Color.rgb(28, 37, 55),
                 sliderAccent, 0.2f)));
         seekBar.setSplitTrack(false);
-        sliderRow.addView(seekBar, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        sliderRow.addView(seekBar, new LinearLayout.LayoutParams(0, dp(38), 1f));
 
         EditText valueInput = new EditText(this);
         valueInput.setTextColor(Color.rgb(232, 237, 244));
-        valueInput.setTextSize(12f);
+        valueInput.setTextSize(11f);
         valueInput.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         valueInput.setGravity(Gravity.CENTER);
         valueInput.setSingleLine(true);
@@ -1552,13 +1557,17 @@ public final class MainActivity extends Activity {
                 new int[] {blend(Color.rgb(12, 17, 27), sliderAccent, 0.18f),
                         Color.rgb(7, 10, 16)});
         inputBackground.setStroke(dp(1), blend(Color.rgb(83, 105, 135), sliderAccent, 0.48f));
-        inputBackground.setCornerRadius(dp(10));
+        inputBackground.setCornerRadius(dp(8));
         valueInput.setBackground(inputBackground);
-        sliderRow.addView(valueInput, new LinearLayout.LayoutParams(dp(58), dp(36)));
+        LinearLayout.LayoutParams valueParams = new LinearLayout.LayoutParams(dp(54), dp(32));
+        valueParams.leftMargin = dp(6);
+        sliderRow.addView(valueInput, valueParams);
 
         Button resetButton = createButton("0", false, Color.rgb(232, 162, 80));
         resetButton.setTextSize(11f);
-        sliderRow.addView(resetButton, new LinearLayout.LayoutParams(dp(34), dp(34)));
+        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(dp(30), dp(30));
+        resetParams.leftMargin = dp(5);
+        sliderRow.addView(resetButton, resetParams);
 
         SliderBinding binding = new SliderBinding(seekBar, initialValue, min, max);
         sliderBindings.add(binding);
@@ -1624,8 +1633,10 @@ public final class MainActivity extends Activity {
             renderControls();
             renderPreview(false);
         });
-        controls.addView(sliderRow, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(56)));
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(50));
+        rowParams.bottomMargin = dp(6);
+        controls.addView(sliderRow, rowParams);
     }
 
     private void attachSliderDoubleTap(SeekBar seekBar, SliderBinding binding, TextView valueLabel,
@@ -3052,6 +3063,7 @@ public final class MainActivity extends Activity {
         button.setTextSize(12f);
         button.setTextColor(selected ? Color.WHITE : blend(Color.rgb(218, 230, 243), accent, 0.24f));
         button.setAllCaps(false);
+        button.setIncludeFontPadding(false);
         button.setMinHeight(0);
         button.setMinWidth(0);
         button.setPadding(dp(8), 0, dp(8), 0);
@@ -3067,7 +3079,7 @@ public final class MainActivity extends Activity {
         }
         background.setStroke(dp(1), selected ? blend(Color.WHITE, accent, 0.42f)
                 : blend(Color.rgb(54, 70, 93), accent, 0.42f));
-        background.setCornerRadius(dp(12));
+        background.setCornerRadius(dp(8));
         button.setBackground(background);
         return button;
     }
