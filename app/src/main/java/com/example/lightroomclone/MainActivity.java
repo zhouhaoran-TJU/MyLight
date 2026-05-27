@@ -22,7 +22,7 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Shader;
 import android.graphics.Typeface;
-import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.media.ExifInterface;
@@ -1430,12 +1430,9 @@ public final class MainActivity extends Activity {
         fallback.setCornerRadius(dp(12));
         fallback.setStroke(dp(1), Color.rgb(76, 96, 125));
         if (thumbnail == null || thumbnail.isRecycled()) {
-            return new LayerDrawable(new android.graphics.drawable.Drawable[] {fallback});
+            return new LayerDrawable(new Drawable[] {fallback});
         }
-        BitmapDrawable image = new BitmapDrawable(getResources(), thumbnail);
-        image.setGravity(Gravity.CENTER);
-        image.setTileModeX(null);
-        image.setTileModeY(null);
+        Drawable image = new CoverBitmapDrawable(thumbnail);
         GradientDrawable shade = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {Color.argb(36, 255, 255, 255), Color.argb(184, 2, 5, 10)});
         shade.setCornerRadius(dp(12));
@@ -1444,7 +1441,7 @@ public final class MainActivity extends Activity {
         stroke.setCornerRadius(dp(12));
         stroke.setStroke(dp(selected ? 2 : 1), selected ? Color.rgb(255, 255, 255)
                 : Color.argb(150, 110, 134, 166));
-        return new LayerDrawable(new android.graphics.drawable.Drawable[] {image, shade, stroke});
+        return new LayerDrawable(new Drawable[] {image, shade, stroke});
     }
 
     private void clearFilterThumbnailCache() {
@@ -3544,6 +3541,51 @@ public final class MainActivity extends Activity {
             this.red = red;
             this.green = green;
             this.blue = blue;
+        }
+    }
+
+    private static final class CoverBitmapDrawable extends Drawable {
+        private final Bitmap bitmap;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private final Rect dst = new Rect();
+
+        CoverBitmapDrawable(Bitmap bitmap) {
+            this.bitmap = bitmap;
+        }
+
+        @Override
+        public void draw(Canvas canvas) {
+            if (bitmap == null || bitmap.isRecycled()) {
+                return;
+            }
+            Rect bounds = getBounds();
+            if (bounds.width() <= 0 || bounds.height() <= 0) {
+                return;
+            }
+            float scale = Math.max(bounds.width() / (float) bitmap.getWidth(),
+                    bounds.height() / (float) bitmap.getHeight());
+            int drawWidth = Math.round(bitmap.getWidth() * scale);
+            int drawHeight = Math.round(bitmap.getHeight() * scale);
+            dst.set(bounds.left + (bounds.width() - drawWidth) / 2,
+                    bounds.top + (bounds.height() - drawHeight) / 2,
+                    bounds.left + (bounds.width() + drawWidth) / 2,
+                    bounds.top + (bounds.height() + drawHeight) / 2);
+            canvas.drawBitmap(bitmap, null, dst, paint);
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+            paint.setAlpha(alpha);
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter colorFilter) {
+            paint.setColorFilter(colorFilter);
+        }
+
+        @Override
+        public int getOpacity() {
+            return android.graphics.PixelFormat.OPAQUE;
         }
     }
 
