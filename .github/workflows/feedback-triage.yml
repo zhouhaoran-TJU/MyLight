@@ -21,11 +21,15 @@ jobs:
             const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner,
               repo,
-              labels: "feedback",
               state: "open",
               per_page: 100
             });
-            const feedback = issues.filter(issue => !issue.pull_request);
+            const feedback = issues.filter(issue => {
+              if (issue.pull_request) return false;
+              const labels = issue.labels.map(label => label.name);
+              const text = `${issue.title}\n${issue.body || ""}`;
+              return labels.includes("feedback") || text.includes("用户反馈") || text.includes("App: MyLight");
+            });
             if (feedback.length === 0) {
               core.info("No open feedback issues.");
               return;

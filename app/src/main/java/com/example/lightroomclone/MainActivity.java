@@ -844,72 +844,78 @@ public final class MainActivity extends Activity {
     }
 
     private void showMoreActions() {
+        ScrollView scrollView = new ScrollView(this);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(14), dp(8), dp(14), dp(10));
+        scrollView.addView(layout);
+        layout.addView(createActionSection("常用", new ActionItem[] {
+                new ActionItem("历史记录", this::showHistoryDialog),
+                new ActionItem("一键优化", this::autoEnhance),
+                new ActionItem("导出设置", this::showExportSettingsDialog),
+                new ActionItem("意见反馈", this::showFeedbackDialog)
+        }));
+        layout.addView(createActionSection("预览", new ActionItem[] {
+                new ActionItem(compareSliderMode ? "关闭滑杆对比" : "开启滑杆对比", () -> {
+                    compareSliderMode = !compareSliderMode;
+                    renderPreview(false);
+                }),
+                new ActionItem(clippingWarningEnabled ? "关闭裁切警告" : "开启裁切警告", () -> {
+                    clippingWarningEnabled = !clippingWarningEnabled;
+                    renderPreview(false);
+                }),
+                new ActionItem("重置预览缩放", () -> {
+                    previewZoom = 1f;
+                    previewPanX = 0f;
+                    previewPanY = 0f;
+                    applyPreviewTransform();
+                }),
+                new ActionItem("长按对比原图", () ->
+                        Toast.makeText(this, "按住预览图查看原图，松开恢复当前效果", Toast.LENGTH_SHORT).show())
+        }));
+        layout.addView(createActionSection("批量与滤镜", new ActionItem[] {
+                new ActionItem("批量选择图片", this::openBatchImages),
+                new ActionItem("批量导出当前效果", this::exportBatchImages),
+                new ActionItem("导入滤镜", this::showImportFiltersDialog),
+                new ActionItem("导出滤镜", this::showExportFiltersDialog),
+                new ActionItem("复制滤镜分享码", this::copyPresetShareCode),
+                new ActionItem("粘贴分享码导入", this::showImportShareCodeDialog)
+        }));
+        layout.addView(createActionSection("草稿与系统", new ActionItem[] {
+                new ActionItem("保存草稿", this::saveDraft),
+                new ActionItem("加载草稿", this::showDraftsDialog),
+                new ActionItem("检查更新", () -> checkForUpdates(true)),
+                new ActionItem("重置全部", this::resetAll)
+        }));
         new AlertDialog.Builder(this)
-                .setTitle("更多操作")
-                .setItems(new String[] {
-                        "历史记录",
-                        "一键优化",
-                        "检查更新",
-                        "意见反馈",
-                        "导出设置",
-                        compareSliderMode ? "关闭滑杆对比" : "开启滑杆对比",
-                        clippingWarningEnabled ? "关闭裁切警告" : "开启裁切警告",
-                        "批量选择图片",
-                        "批量导出当前效果",
-                        "导入滤镜",
-                        "导出滤镜",
-                        "保存草稿",
-                        "加载草稿",
-                        "复制滤镜分享码",
-                        "粘贴分享码导入",
-                        "重置全部",
-                        "重置预览缩放",
-                        "长按图片可对比原图"
-                }, (dialog, which) -> {
-                    if (which == 0) {
-                        showHistoryDialog();
-                    } else if (which == 1) {
-                        autoEnhance();
-                    } else if (which == 2) {
-                        checkForUpdates(true);
-                    } else if (which == 3) {
-                        showFeedbackDialog();
-                    } else if (which == 4) {
-                        showExportSettingsDialog();
-                    } else if (which == 5) {
-                        compareSliderMode = !compareSliderMode;
-                        renderPreview(false);
-                    } else if (which == 6) {
-                        clippingWarningEnabled = !clippingWarningEnabled;
-                        renderPreview(false);
-                    } else if (which == 7) {
-                        openBatchImages();
-                    } else if (which == 8) {
-                        exportBatchImages();
-                    } else if (which == 9) {
-                        showImportFiltersDialog();
-                    } else if (which == 10) {
-                        showExportFiltersDialog();
-                    } else if (which == 11) {
-                        saveDraft();
-                    } else if (which == 12) {
-                        showDraftsDialog();
-                    } else if (which == 13) {
-                        copyPresetShareCode();
-                    } else if (which == 14) {
-                        showImportShareCodeDialog();
-                    } else if (which == 15) {
-                        resetAll();
-                    } else if (which == 16) {
-                        previewZoom = 1f;
-                        previewPanX = 0f;
-                        previewPanY = 0f;
-                        applyPreviewTransform();
-                    } else {
-                        Toast.makeText(this, "按住预览图查看原图，松开恢复当前效果", Toast.LENGTH_SHORT).show();
-                    }
-                })
+                .setTitle("工具")
+                .setView(scrollView)
+                .setNegativeButton("关闭", null)
                 .show();
+    }
+
+    private View createActionSection(String title, ActionItem[] items) {
+        LinearLayout section = new LinearLayout(this);
+        section.setOrientation(LinearLayout.VERTICAL);
+        section.addView(createSectionLabel(title));
+        GridLayout grid = createButtonGrid(2);
+        for (ActionItem item : items) {
+            addActionButton(grid, item);
+        }
+        section.addView(grid);
+        return section;
+    }
+
+    private void addActionButton(GridLayout grid, ActionItem item) {
+        Button button = createButton(item.label, false);
+        button.setGravity(Gravity.CENTER);
+        button.setOnClickListener(v -> item.action.run());
+        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+        params.width = 0;
+        params.height = dp(42);
+        params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
+        params.setMargins(dp(4), dp(3), dp(4), dp(5));
+        grid.addView(button, params);
     }
 
     private void checkForUpdates(boolean manual) {
@@ -3917,6 +3923,16 @@ public final class MainActivity extends Activity {
 
     private interface SliderConsumer {
         void accept(float value);
+    }
+
+    private static final class ActionItem {
+        final String label;
+        final Runnable action;
+
+        ActionItem(String label, Runnable action) {
+            this.label = label;
+            this.action = action;
+        }
     }
 
     private static final class SliderBinding {
