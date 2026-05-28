@@ -1133,7 +1133,7 @@ public final class MainActivity extends Activity {
         layout.setPadding(dp(18), dp(6), dp(18), 0);
 
         TextView intro = new TextView(this);
-        intro.setText("本地模式无需网络；网关模式适合正式分发；开发者直连会把 API Key 存在本机，仅建议自测。AI 只返回调色参数，图片仍在本地实时渲染。");
+        intro.setText("选择一种 AI 模式后，只显示该模式需要的配置。AI 只返回调色参数，图片仍在本地实时渲染。");
         intro.setTextColor(Color.rgb(206, 218, 234));
         intro.setTextSize(12f);
         intro.setPadding(0, 0, 0, dp(10));
@@ -1154,14 +1154,25 @@ public final class MainActivity extends Activity {
         addAiChoiceButton(modeRow, directModeButton);
         layout.addView(modeRow);
 
+        TextView modeInfo = new TextView(this);
+        modeInfo.setTextColor(Color.rgb(190, 204, 222));
+        modeInfo.setTextSize(12f);
+        modeInfo.setPadding(dp(2), 0, dp(2), dp(8));
+        layout.addView(modeInfo);
+
+        LinearLayout gatewayConfig = new LinearLayout(this);
+        gatewayConfig.setOrientation(LinearLayout.VERTICAL);
         EditText urlInput = new EditText(this);
         urlInput.setSingleLine(true);
         urlInput.setHint("网关地址：" + AI_GATEWAY_PLACEHOLDER);
         urlInput.setText(preferences.getString(KEY_AI_GATEWAY_URL, ""));
         urlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        layout.addView(urlInput, new LinearLayout.LayoutParams(
+        gatewayConfig.addView(urlInput, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+        layout.addView(gatewayConfig);
 
+        LinearLayout directConfig = new LinearLayout(this);
+        directConfig.setOrientation(LinearLayout.VERTICAL);
         LinearLayout providerRow = createButtonRow();
         Button openAiButton = createButton("OpenAI", AI_PROVIDER_OPENAI.equals(providerHolder[0]),
                 Color.rgb(89, 199, 255));
@@ -1169,14 +1180,14 @@ public final class MainActivity extends Activity {
                 Color.rgb(164, 128, 255));
         addAiChoiceButton(providerRow, openAiButton);
         addAiChoiceButton(providerRow, geminiButton);
-        layout.addView(providerRow);
+        directConfig.addView(providerRow);
 
         EditText apiKeyInput = new EditText(this);
         apiKeyInput.setSingleLine(true);
         apiKeyInput.setHint("开发者直连 API Key");
         apiKeyInput.setText(preferences.getString(KEY_AI_DIRECT_API_KEY, ""));
         apiKeyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        layout.addView(apiKeyInput, new LinearLayout.LayoutParams(
+        directConfig.addView(apiKeyInput, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
 
         EditText modelInput = new EditText(this);
@@ -1184,8 +1195,9 @@ public final class MainActivity extends Activity {
         modelInput.setHint("模型名，例如 " + DEFAULT_OPENAI_MODEL + " / " + DEFAULT_GEMINI_MODEL);
         modelInput.setText(preferences.getString(KEY_AI_DIRECT_MODEL, DEFAULT_OPENAI_MODEL));
         modelInput.setInputType(InputType.TYPE_CLASS_TEXT);
-        layout.addView(modelInput, new LinearLayout.LayoutParams(
+        directConfig.addView(modelInput, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+        layout.addView(directConfig);
 
         EditText promptInput = new EditText(this);
         promptInput.setMinLines(3);
@@ -1226,6 +1238,15 @@ public final class MainActivity extends Activity {
                     Color.rgb(89, 199, 255));
             styleAiChoiceButton(geminiButton, "Gemini", AI_PROVIDER_GEMINI.equals(providerHolder[0]),
                     Color.rgb(164, 128, 255));
+            gatewayConfig.setVisibility(modeHolder[0] == AI_MODE_GATEWAY ? View.VISIBLE : View.GONE);
+            directConfig.setVisibility(modeHolder[0] == AI_MODE_DIRECT ? View.VISIBLE : View.GONE);
+            if (modeHolder[0] == AI_MODE_GATEWAY) {
+                modeInfo.setText("网关模式：适合正式分发，由你的后端保管 API Key 并统一调用大模型。");
+            } else if (modeHolder[0] == AI_MODE_DIRECT) {
+                modeInfo.setText("开发者直连：仅建议自测，API Key 会保存在本机。");
+            } else {
+                modeInfo.setText("本地模式：无需网络和 API Key，使用图片统计和关键词生成调色参数。");
+            }
         };
         localModeButton.setOnClickListener(v -> {
             modeHolder[0] = AI_MODE_LOCAL;
