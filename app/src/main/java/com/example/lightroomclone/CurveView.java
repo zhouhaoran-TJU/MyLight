@@ -107,8 +107,6 @@ final class CurveView extends View {
         if (selectedPoint >= 0 && selectedPoint < curve.pointCount()) {
             String label = curve.getX(selectedPoint) + " / " + curve.getY(selectedPoint);
             canvas.drawText(label, left + dp(8), top + dp(18), labelPaint);
-        } else if (!editingEnabled) {
-            canvas.drawText("点击「调整」后编辑曲线", left + dp(8), top + dp(18), labelPaint);
         }
     }
 

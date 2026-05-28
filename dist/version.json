@@ -1,6 +1,6 @@
 {
-  "versionCode": 10,
-  "versionName": "1.9-beta",
+  "versionCode": 11,
+  "versionName": "2.0-beta",
   "apkUrl": "https://github.com/zhouhaoran-TJU/MyLight/raw/main/dist/MyLight-beta.apk",
-  "notes": "优化全局按钮视觉：按钮增加圆角、渐变、描边、高光和按压状态，整体界面更精致统一。"
+  "notes": "系统性 UI 优化：响应式控制面板、AI 弹窗滚动与操作重排、两行滑条、滤镜标题截断、直方图折叠、裁剪和局部调整视觉反馈增强。"
 }

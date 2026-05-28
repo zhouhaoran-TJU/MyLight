@@ -12,6 +12,7 @@ final class LocalAdjustOverlayView extends View {
     private final ColorAdjustments adjustments;
     private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     LocalAdjustOverlayView(Context context, ColorAdjustments adjustments) {
         super(context);
@@ -19,6 +20,9 @@ final class LocalAdjustOverlayView extends View {
         strokePaint.setStyle(Paint.Style.STROKE);
         strokePaint.setStrokeWidth(dp(2));
         fillPaint.setStyle(Paint.Style.FILL);
+        labelPaint.setTextSize(dp(12));
+        labelPaint.setTextAlign(Paint.Align.CENTER);
+        labelPaint.setFakeBoldText(true);
     }
 
     @Override
@@ -48,6 +52,12 @@ final class LocalAdjustOverlayView extends View {
             fillPaint.setColor(active ? Color.rgb(90, 230, 190) : Color.WHITE);
             fillPaint.setAlpha(active ? 230 : 150);
             canvas.drawCircle(cx, cy, dp(active ? 6 : 4), fillPaint);
+            float labelX = Math.min(width - dp(16), Math.max(dp(16), cx + dp(18)));
+            float labelY = Math.max(dp(18), cy - dp(14));
+            fillPaint.setColor(Color.argb(active ? 230 : 170, 6, 11, 18));
+            canvas.drawCircle(labelX, labelY - dp(4), dp(11), fillPaint);
+            labelPaint.setColor(active ? Color.WHITE : Color.rgb(210, 225, 240));
+            canvas.drawText(String.valueOf(i + 1), labelX, labelY, labelPaint);
         }
     }
 

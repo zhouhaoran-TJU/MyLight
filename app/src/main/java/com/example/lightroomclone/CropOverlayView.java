@@ -38,6 +38,7 @@ final class CropOverlayView extends View {
     private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint handlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint activePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF imageBounds = new RectF();
     private final RectF cropBounds = new RectF();
     private Listener listener;
@@ -60,6 +61,10 @@ final class CropOverlayView extends View {
         gridPaint.setStrokeWidth(dp(1));
         handlePaint.setColor(Color.rgb(77, 224, 216));
         handlePaint.setStyle(Paint.Style.FILL);
+        activePaint.setColor(Color.WHITE);
+        activePaint.setStrokeWidth(dp(3));
+        activePaint.setStyle(Paint.Style.STROKE);
+        activePaint.setStrokeCap(Paint.Cap.ROUND);
     }
 
     void setListener(Listener listener) {
@@ -90,14 +95,19 @@ final class CropOverlayView extends View {
 
         drawGrid(canvas);
         canvas.drawRect(cropBounds, borderPaint);
-        drawHandle(canvas, cropBounds.left, cropBounds.top);
-        drawHandle(canvas, cropBounds.right, cropBounds.top);
-        drawHandle(canvas, cropBounds.left, cropBounds.bottom);
-        drawHandle(canvas, cropBounds.right, cropBounds.bottom);
-        drawHandle(canvas, cropBounds.centerX(), cropBounds.top);
-        drawHandle(canvas, cropBounds.centerX(), cropBounds.bottom);
-        drawHandle(canvas, cropBounds.left, cropBounds.centerY());
-        drawHandle(canvas, cropBounds.right, cropBounds.centerY());
+        drawActiveEdge(canvas);
+        drawCornerHandle(canvas, cropBounds.left, cropBounds.top, 1, 1,
+                activeHandle == HANDLE_TOP_LEFT);
+        drawCornerHandle(canvas, cropBounds.right, cropBounds.top, -1, 1,
+                activeHandle == HANDLE_TOP_RIGHT);
+        drawCornerHandle(canvas, cropBounds.left, cropBounds.bottom, 1, -1,
+                activeHandle == HANDLE_BOTTOM_LEFT);
+        drawCornerHandle(canvas, cropBounds.right, cropBounds.bottom, -1, -1,
+                activeHandle == HANDLE_BOTTOM_RIGHT);
+        drawEdgeHandle(canvas, cropBounds.centerX(), cropBounds.top, activeHandle == HANDLE_TOP);
+        drawEdgeHandle(canvas, cropBounds.centerX(), cropBounds.bottom, activeHandle == HANDLE_BOTTOM);
+        drawEdgeHandle(canvas, cropBounds.left, cropBounds.centerY(), activeHandle == HANDLE_LEFT);
+        drawEdgeHandle(canvas, cropBounds.right, cropBounds.centerY(), activeHandle == HANDLE_RIGHT);
     }
 
     private void drawGrid(Canvas canvas) {
@@ -379,8 +389,40 @@ final class CropOverlayView extends View {
         }
     }
 
-    private void drawHandle(Canvas canvas, float x, float y) {
-        canvas.drawCircle(x, y, dp(5), handlePaint);
+    private void drawActiveEdge(Canvas canvas) {
+        if (activeHandle == HANDLE_NONE || activeHandle == HANDLE_MOVE) {
+            return;
+        }
+        if (activeHandle == HANDLE_LEFT || activeHandle == HANDLE_TOP_LEFT
+                || activeHandle == HANDLE_BOTTOM_LEFT) {
+            canvas.drawLine(cropBounds.left, cropBounds.top, cropBounds.left, cropBounds.bottom, activePaint);
+        }
+        if (activeHandle == HANDLE_RIGHT || activeHandle == HANDLE_TOP_RIGHT
+                || activeHandle == HANDLE_BOTTOM_RIGHT) {
+            canvas.drawLine(cropBounds.right, cropBounds.top, cropBounds.right, cropBounds.bottom, activePaint);
+        }
+        if (activeHandle == HANDLE_TOP || activeHandle == HANDLE_TOP_LEFT
+                || activeHandle == HANDLE_TOP_RIGHT) {
+            canvas.drawLine(cropBounds.left, cropBounds.top, cropBounds.right, cropBounds.top, activePaint);
+        }
+        if (activeHandle == HANDLE_BOTTOM || activeHandle == HANDLE_BOTTOM_LEFT
+                || activeHandle == HANDLE_BOTTOM_RIGHT) {
+            canvas.drawLine(cropBounds.left, cropBounds.bottom, cropBounds.right, cropBounds.bottom, activePaint);
+        }
+    }
+
+    private void drawCornerHandle(Canvas canvas, float x, float y, int sx, int sy, boolean active) {
+        Paint paint = active ? activePaint : borderPaint;
+        float length = dp(active ? 28 : 22);
+        canvas.drawLine(x, y, x + sx * length, y, paint);
+        canvas.drawLine(x, y, x, y + sy * length, paint);
+        canvas.drawCircle(x, y, dp(active ? 7 : 5), handlePaint);
+    }
+
+    private void drawEdgeHandle(Canvas canvas, float x, float y, boolean active) {
+        handlePaint.setAlpha(active ? 255 : 210);
+        canvas.drawCircle(x, y, dp(active ? 7 : 5), handlePaint);
+        handlePaint.setAlpha(255);
     }
 
     private boolean near(float x, float y, float targetX, float targetY, float radius) {
