@@ -1,6 +1,6 @@
 {
-  "versionCode": 8,
-  "versionName": "1.7-beta",
+  "versionCode": 9,
+  "versionName": "1.8-beta",
   "apkUrl": "https://github.com/zhouhaoran-TJU/MyLight/raw/main/dist/MyLight-beta.apk",
-  "notes": "AI 直连模式新增 MiMo 与 MiMo 百炼 Provider，可使用 OpenAI-compatible chat/completions 生成 MyLight 调色参数。"
+  "notes": "AI 直连模式支持按 Provider 和模型分别保存 API Key，切换模型自动加载对应 API，并新增保存、选择、清除 API 操作。"
 }

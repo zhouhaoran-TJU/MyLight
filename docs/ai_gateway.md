@@ -119,3 +119,9 @@ MiMo 百炼：
 - 图片以 OpenAI-compatible `image_url` data URL 形式传入
 
 直连模式只接受模型返回 JSON。若模型返回 Markdown、解释性文字或非 JSON 内容，客户端会尝试提取第一个 JSON 对象，失败时提示“AI 返回格式不正确”。
+
+直连模式会按 `Provider + Model` 分别保存 API Key。切换 Provider 或模型后，App 会自动加载对应保存过的 Key；也可以使用：
+
+- 保存API：把当前输入的 Key 保存到当前 Provider 和模型下。
+- 选择API：从所有已保存 Key 中切换，选择后同步切换 Provider、模型和 Key。
+- 清除API：清除当前 Provider 和模型下保存的 Key，并清空输入框。

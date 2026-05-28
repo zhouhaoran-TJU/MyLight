@@ -111,6 +111,7 @@ public final class MainActivity extends Activity {
     private static final String KEY_AI_GATEWAY_URL = "ai_gateway_url";
     private static final String KEY_AI_DIRECT_PROVIDER = "ai_direct_provider";
     private static final String KEY_AI_DIRECT_API_KEY = "ai_direct_api_key";
+    private static final String KEY_AI_DIRECT_API_KEYS = "ai_direct_api_keys";
     private static final String KEY_AI_DIRECT_MODEL = "ai_direct_model";
     private static final String EXPORT_FOLDER = "MyLight";
     private static final String SESSION_IMAGE_NAME = "last_session.jpg";
@@ -1194,10 +1195,13 @@ public final class MainActivity extends Activity {
         addAiChoiceButton(providerRow2, mimoBailianButton);
         directConfig.addView(providerRow2);
 
+        String initialModel = preferences.getString(KEY_AI_DIRECT_MODEL,
+                defaultModelForProvider(providerHolder[0]));
+
         EditText apiKeyInput = new EditText(this);
         apiKeyInput.setSingleLine(true);
         apiKeyInput.setHint("开发者直连 API Key");
-        apiKeyInput.setText(preferences.getString(KEY_AI_DIRECT_API_KEY, ""));
+        apiKeyInput.setText(loadAiApiKey(providerHolder[0], initialModel));
         apiKeyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         directConfig.addView(apiKeyInput, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
@@ -1205,10 +1209,20 @@ public final class MainActivity extends Activity {
         EditText modelInput = new EditText(this);
         modelInput.setSingleLine(true);
         modelInput.setHint("模型名，例如 " + DEFAULT_OPENAI_MODEL + " / " + DEFAULT_MIMO_MODEL);
-        modelInput.setText(preferences.getString(KEY_AI_DIRECT_MODEL, defaultModelForProvider(providerHolder[0])));
+        modelInput.setText(initialModel);
         modelInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        modelInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
         directConfig.addView(modelInput, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+
+        LinearLayout apiActionRow = createButtonRow();
+        Button saveApiButton = createButton("保存API", false, Color.rgb(77, 224, 163));
+        Button chooseApiButton = createButton("选择API", false, Color.rgb(89, 199, 255));
+        Button clearApiButton = createButton("清除API", false, Color.rgb(255, 180, 92));
+        addAiChoiceButton(apiActionRow, saveApiButton);
+        addAiChoiceButton(apiActionRow, chooseApiButton);
+        addAiChoiceButton(apiActionRow, clearApiButton);
+        directConfig.addView(apiActionRow);
         layout.addView(directConfig);
 
         EditText promptInput = new EditText(this);
@@ -1277,24 +1291,66 @@ public final class MainActivity extends Activity {
             refreshChoices.run();
         });
         openAiButton.setOnClickListener(v -> {
+            saveAiApiKeyIfPresent(providerHolder[0], modelInput.getText().toString(),
+                    apiKeyInput.getText().toString());
             providerHolder[0] = AI_PROVIDER_OPENAI;
             updateModelForProvider(modelInput, providerHolder[0]);
+            apiKeyInput.setText(loadAiApiKey(providerHolder[0], modelInput.getText().toString()));
             refreshChoices.run();
         });
         geminiButton.setOnClickListener(v -> {
+            saveAiApiKeyIfPresent(providerHolder[0], modelInput.getText().toString(),
+                    apiKeyInput.getText().toString());
             providerHolder[0] = AI_PROVIDER_GEMINI;
             updateModelForProvider(modelInput, providerHolder[0]);
+            apiKeyInput.setText(loadAiApiKey(providerHolder[0], modelInput.getText().toString()));
             refreshChoices.run();
         });
         mimoButton.setOnClickListener(v -> {
+            saveAiApiKeyIfPresent(providerHolder[0], modelInput.getText().toString(),
+                    apiKeyInput.getText().toString());
             providerHolder[0] = AI_PROVIDER_MIMO;
             updateModelForProvider(modelInput, providerHolder[0]);
+            apiKeyInput.setText(loadAiApiKey(providerHolder[0], modelInput.getText().toString()));
             refreshChoices.run();
         });
         mimoBailianButton.setOnClickListener(v -> {
+            saveAiApiKeyIfPresent(providerHolder[0], modelInput.getText().toString(),
+                    apiKeyInput.getText().toString());
             providerHolder[0] = AI_PROVIDER_MIMO_BAILIAN;
             updateModelForProvider(modelInput, providerHolder[0]);
+            apiKeyInput.setText(loadAiApiKey(providerHolder[0], modelInput.getText().toString()));
             refreshChoices.run();
+        });
+        modelInput.setOnFocusChangeListener((view, hasFocus) -> {
+            if (!hasFocus) {
+                apiKeyInput.setText(loadAiApiKey(providerHolder[0], modelInput.getText().toString()));
+            }
+        });
+        modelInput.setOnEditorActionListener((view, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_DONE || actionId == EditorInfo.IME_ACTION_UNSPECIFIED) {
+                apiKeyInput.setText(loadAiApiKey(providerHolder[0], modelInput.getText().toString()));
+                modelInput.clearFocus();
+                return true;
+            }
+            return false;
+        });
+        saveApiButton.setOnClickListener(v -> {
+            String apiKey = apiKeyInput.getText().toString().trim();
+            if (apiKey.isEmpty()) {
+                Toast.makeText(this, "请先输入 API Key", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            saveAiApiKey(providerHolder[0], modelInput.getText().toString(), apiKey);
+            Toast.makeText(this, "已保存当前模型 API", Toast.LENGTH_SHORT).show();
+        });
+        chooseApiButton.setOnClickListener(v -> showAiApiKeyPicker(providerHolder, modelInput,
+                apiKeyInput, refreshChoices));
+        clearApiButton.setOnClickListener(v -> {
+            removeAiApiKeys(providerHolder[0], modelInput.getText().toString());
+            apiKeyInput.setText("");
+            preferences.edit().putString(KEY_AI_DIRECT_API_KEY, "").apply();
+            Toast.makeText(this, "已清除当前模型 API", Toast.LENGTH_SHORT).show();
         });
         refreshChoices.run();
         View.OnClickListener listener = v -> {
@@ -1308,6 +1364,9 @@ public final class MainActivity extends Activity {
                     .putString(KEY_AI_DIRECT_API_KEY, apiKey)
                     .putString(KEY_AI_DIRECT_MODEL, model)
                     .apply();
+            if (modeHolder[0] == AI_MODE_DIRECT && !apiKey.isEmpty()) {
+                saveAiApiKey(providerHolder[0], model, apiKey);
+            }
             String prompt = promptInput.getText().toString().trim();
             if (v == autoButton) {
                 runAiRequest("auto_enhance", prompt.isEmpty() ? "自动优化这张照片，保持自然真实" : prompt,
@@ -1375,6 +1434,158 @@ public final class MainActivity extends Activity {
                 || DEFAULT_GEMINI_MODEL.equals(model)
                 || DEFAULT_MIMO_MODEL.equals(model)
                 || DEFAULT_MIMO_BAILIAN_MODEL.equals(model);
+    }
+
+    private String normalizeAiModel(String provider, String model) {
+        String clean = model == null ? "" : model.trim();
+        return clean.isEmpty() ? defaultModelForProvider(provider) : clean;
+    }
+
+    private String loadAiApiKey(String provider, String model) {
+        String normalizedModel = normalizeAiModel(provider, model);
+        try {
+            JSONArray entries = new JSONArray(preferences.getString(KEY_AI_DIRECT_API_KEYS, "[]"));
+            for (int i = entries.length() - 1; i >= 0; i--) {
+                JSONObject entry = entries.getJSONObject(i);
+                if (provider.equals(entry.optString("provider"))
+                        && normalizedModel.equals(entry.optString("model"))) {
+                    return entry.optString("key", "");
+                }
+            }
+        } catch (JSONException exception) {
+            preferences.edit().putString(KEY_AI_DIRECT_API_KEYS, "[]").apply();
+        }
+        String lastProvider = preferences.getString(KEY_AI_DIRECT_PROVIDER, "");
+        String lastModel = preferences.getString(KEY_AI_DIRECT_MODEL, "");
+        if (provider.equals(lastProvider) && normalizedModel.equals(lastModel)) {
+            return preferences.getString(KEY_AI_DIRECT_API_KEY, "");
+        }
+        return "";
+    }
+
+    private void saveAiApiKeyIfPresent(String provider, String model, String apiKey) {
+        if (apiKey != null && !apiKey.trim().isEmpty()) {
+            saveAiApiKey(provider, model, apiKey);
+        }
+    }
+
+    private void saveAiApiKey(String provider, String model, String apiKey) {
+        String cleanKey = apiKey == null ? "" : apiKey.trim();
+        if (cleanKey.isEmpty()) {
+            return;
+        }
+        String normalizedModel = normalizeAiModel(provider, model);
+        try {
+            JSONArray current = new JSONArray(preferences.getString(KEY_AI_DIRECT_API_KEYS, "[]"));
+            JSONArray next = new JSONArray();
+            for (int i = 0; i < current.length(); i++) {
+                JSONObject entry = current.getJSONObject(i);
+                boolean duplicate = provider.equals(entry.optString("provider"))
+                        && normalizedModel.equals(entry.optString("model"))
+                        && cleanKey.equals(entry.optString("key"));
+                if (!duplicate) {
+                    next.put(entry);
+                }
+            }
+            JSONObject entry = new JSONObject();
+            entry.put("provider", provider);
+            entry.put("model", normalizedModel);
+            entry.put("key", cleanKey);
+            entry.put("savedAt", System.currentTimeMillis());
+            next.put(entry);
+            while (next.length() > 40) {
+                next.remove(0);
+            }
+            preferences.edit()
+                    .putString(KEY_AI_DIRECT_API_KEYS, next.toString())
+                    .putString(KEY_AI_DIRECT_PROVIDER, provider)
+                    .putString(KEY_AI_DIRECT_MODEL, normalizedModel)
+                    .putString(KEY_AI_DIRECT_API_KEY, cleanKey)
+                    .apply();
+        } catch (JSONException exception) {
+            preferences.edit().putString(KEY_AI_DIRECT_API_KEYS, "[]").apply();
+        }
+    }
+
+    private void removeAiApiKeys(String provider, String model) {
+        String normalizedModel = normalizeAiModel(provider, model);
+        try {
+            JSONArray current = new JSONArray(preferences.getString(KEY_AI_DIRECT_API_KEYS, "[]"));
+            JSONArray next = new JSONArray();
+            for (int i = 0; i < current.length(); i++) {
+                JSONObject entry = current.getJSONObject(i);
+                boolean sameModel = provider.equals(entry.optString("provider"))
+                        && normalizedModel.equals(entry.optString("model"));
+                if (!sameModel) {
+                    next.put(entry);
+                }
+            }
+            preferences.edit().putString(KEY_AI_DIRECT_API_KEYS, next.toString()).apply();
+        } catch (JSONException exception) {
+            preferences.edit().putString(KEY_AI_DIRECT_API_KEYS, "[]").apply();
+        }
+    }
+
+    private void showAiApiKeyPicker(String[] providerHolder, EditText modelInput,
+            EditText apiKeyInput, Runnable refreshChoices) {
+        try {
+            JSONArray entries = new JSONArray(preferences.getString(KEY_AI_DIRECT_API_KEYS, "[]"));
+            if (entries.length() == 0) {
+                Toast.makeText(this, "暂无已保存 API", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            List<JSONObject> choices = new ArrayList<>();
+            List<String> labels = new ArrayList<>();
+            for (int i = entries.length() - 1; i >= 0; i--) {
+                JSONObject entry = entries.getJSONObject(i);
+                choices.add(entry);
+                labels.add(providerLabel(entry.optString("provider")) + " · "
+                        + entry.optString("model", defaultModelForProvider(entry.optString("provider")))
+                        + "\n" + maskApiKey(entry.optString("key", "")));
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle("选择已保存 API")
+                    .setItems(labels.toArray(new String[0]), (dialog, which) -> {
+                        JSONObject entry = choices.get(which);
+                        String provider = entry.optString("provider", AI_PROVIDER_OPENAI);
+                        String model = entry.optString("model", defaultModelForProvider(provider));
+                        String key = entry.optString("key", "");
+                        providerHolder[0] = provider;
+                        modelInput.setText(model);
+                        apiKeyInput.setText(key);
+                        preferences.edit()
+                                .putString(KEY_AI_DIRECT_PROVIDER, provider)
+                                .putString(KEY_AI_DIRECT_MODEL, model)
+                                .putString(KEY_AI_DIRECT_API_KEY, key)
+                                .apply();
+                        refreshChoices.run();
+                    })
+                    .setNegativeButton("关闭", null)
+                    .show();
+        } catch (JSONException exception) {
+            preferences.edit().putString(KEY_AI_DIRECT_API_KEYS, "[]").apply();
+            Toast.makeText(this, "API 列表读取失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String providerLabel(String provider) {
+        if (AI_PROVIDER_GEMINI.equals(provider)) {
+            return "Gemini";
+        }
+        if (AI_PROVIDER_MIMO.equals(provider)) {
+            return "MiMo";
+        }
+        if (AI_PROVIDER_MIMO_BAILIAN.equals(provider)) {
+            return "MiMo百炼";
+        }
+        return "OpenAI";
+    }
+
+    private String maskApiKey(String key) {
+        if (key == null || key.length() <= 8) {
+            return "API: " + (key == null ? "" : key);
+        }
+        return "API: " + key.substring(0, 4) + "..." + key.substring(key.length() - 4);
     }
 
     private void runAiRequest(String action, String prompt, boolean saveAsFilter, int mode,
