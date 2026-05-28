@@ -127,7 +127,7 @@ public final class MainActivity extends Activity {
     private static final String AI_PROVIDER_MIMO_BAILIAN = "mimo_bailian";
     private static final String DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
     private static final String DEFAULT_GEMINI_MODEL = "gemini-1.5-flash";
-    private static final String DEFAULT_MIMO_MODEL = "mimo-v2.5";
+    private static final String DEFAULT_MIMO_MODEL = "mimo-v2-omni";
     private static final String DEFAULT_MIMO_BAILIAN_MODEL = "xiaomi/mimo-v2.5-pro";
     private static final String UPDATE_INFO_URL =
             "https://raw.githubusercontent.com/zhouhaoran-TJU/MyLight/main/dist/version.json";
@@ -1843,12 +1843,12 @@ public final class MainActivity extends Activity {
         }
         if (AI_PROVIDER_MIMO.equals(provider)) {
             return requestChatCompletionsDirect("https://api.mimo-v2.com/v1/chat/completions",
-                    apiKey, model, DEFAULT_MIMO_MODEL, prompt, base64, true);
+                    apiKey, model, DEFAULT_MIMO_MODEL, prompt, base64, true, "max_completion_tokens");
         }
         if (AI_PROVIDER_MIMO_BAILIAN.equals(provider)) {
             return requestChatCompletionsDirect(
                     "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-                    apiKey, model, DEFAULT_MIMO_BAILIAN_MODEL, prompt, base64, false);
+                    apiKey, model, DEFAULT_MIMO_BAILIAN_MODEL, prompt, base64, false, "max_tokens");
         }
         return requestOpenAiDirect(apiKey, model, prompt, base64);
     }
@@ -1927,21 +1927,26 @@ public final class MainActivity extends Activity {
     }
 
     private JSONObject requestChatCompletionsDirect(String url, String apiKey, String model,
-            String defaultModel, String prompt, String base64, boolean includeApiKeyHeader)
+            String defaultModel, String prompt, String base64, boolean includeApiKeyHeader,
+            String maxTokensField)
             throws IOException, JSONException {
         JSONObject body = new JSONObject();
         body.put("model", model == null || model.trim().isEmpty() ? defaultModel : model.trim());
         body.put("temperature", 0.2);
-        body.put("max_tokens", 900);
+        body.put(maxTokensField, 900);
+        body.put("response_format", new JSONObject().put("type", "json_object"));
         JSONArray content = new JSONArray();
         content.put(new JSONObject().put("type", "text").put("text", prompt));
         content.put(new JSONObject().put("type", "image_url")
                 .put("image_url", new JSONObject()
                         .put("url", "data:image/jpeg;base64," + base64)));
-        JSONObject message = new JSONObject()
+        JSONObject systemMessage = new JSONObject()
+                .put("role", "system")
+                .put("content", "你只输出一个合法 JSON 对象，不输出 Markdown、解释或代码块。");
+        JSONObject userMessage = new JSONObject()
                 .put("role", "user")
                 .put("content", content);
-        body.put("messages", new JSONArray().put(message));
+        body.put("messages", new JSONArray().put(systemMessage).put(userMessage));
         Map<String, String> headers = new HashMap<>();
         headers.put("Authorization", "Bearer " + apiKey);
         if (includeApiKeyHeader) {
@@ -2191,7 +2196,7 @@ public final class MainActivity extends Activity {
         if (message == null || message.trim().isEmpty()) {
             return exception.getClass().getSimpleName();
         }
-        return message.length() > 80 ? message.substring(0, 80) : message;
+        return message.length() > 180 ? message.substring(0, 180) : message;
     }
 
     private void rebuildPanelTabs() {

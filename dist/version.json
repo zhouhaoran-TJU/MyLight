@@ -1,6 +1,6 @@
 {
-  "versionCode": 11,
-  "versionName": "2.0-beta",
+  "versionCode": 12,
+  "versionName": "2.1-beta",
   "apkUrl": "https://github.com/zhouhaoran-TJU/MyLight/raw/main/dist/MyLight-beta.apk",
-  "notes": "系统性 UI 优化：响应式控制面板、AI 弹窗滚动与操作重排、两行滑条、滤镜标题截断、直方图折叠、裁剪和局部调整视觉反馈增强。"
+  "notes": "修复 MiMo 直连兼容性：默认切换到 mimo-v2-omni，MiMo 官方请求使用 max_completion_tokens，并增强 JSON 输出约束和错误提示。"
 }

@@ -105,10 +105,11 @@ Gemini：
 MiMo：
 
 - Provider：`MiMo`
-- Model 示例：`mimo-v2.5`
+- Model 示例：`mimo-v2-omni`
 - App 会请求：`https://api.mimo-v2.com/v1/chat/completions`
 - 鉴权同时发送 `Authorization: Bearer {API Key}` 和 `api-key: {API Key}`
 - 图片以 OpenAI-compatible `image_url` data URL 形式传入
+- 输出长度参数使用 `max_completion_tokens`
 
 MiMo 百炼：
 
