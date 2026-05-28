@@ -1,6 +1,12 @@
 # MyLight AI 网关协议
 
-MyLight Android 客户端不会内置大模型 API Key。App 会把低分辨率 JPEG、当前调色参数和用户指令 POST 到你配置的后端网关，由后端调用 OpenAI、Gemini、Claude 或其他多模态模型。
+MyLight 支持三种 AI 模式：
+
+- 本地模式：不需要网络和 API Key，根据图片统计信息和用户关键词在 App 内生成调色参数。
+- 网关模式：App 把低分辨率 JPEG、当前调色参数和用户指令 POST 到你配置的后端网关，由后端调用 OpenAI、Gemini、Claude 或其他多模态模型。
+- 开发者直连：App 直接调用 OpenAI Responses API 或 Gemini `generateContent` REST API。这个模式会把 API Key 保存在本机，仅建议自测，不建议正式分发默认开启。
+
+正式分发仍推荐使用网关模式，避免在客户端暴露 API Key。
 
 ## 请求
 
@@ -79,3 +85,21 @@ X-MyLight-Client: android
 ```
 
 客户端会对所有数值做范围裁剪，并继续用本地 GPU shader 实时渲染。
+
+## 开发者直连
+
+OpenAI：
+
+- Provider：`OpenAI`
+- Model 示例：`gpt-4.1-mini`
+- App 会请求：`https://api.openai.com/v1/responses`
+- 图片以 `data:image/jpeg;base64,...` 形式放入 `input_image`
+
+Gemini：
+
+- Provider：`Gemini`
+- Model 示例：`gemini-1.5-flash`
+- App 会请求：`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
+- 图片以 `inline_data` 形式传入
+
+直连模式只接受模型返回 JSON。若模型返回 Markdown、解释性文字或非 JSON 内容，客户端会尝试提取第一个 JSON 对象，失败时提示“AI 返回格式不正确”。

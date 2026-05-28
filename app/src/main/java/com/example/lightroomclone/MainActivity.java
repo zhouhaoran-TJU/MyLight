@@ -107,10 +107,21 @@ public final class MainActivity extends Activity {
     private static final String KEY_EXPORT_QUALITY = "export_quality";
     private static final String KEY_EXPORT_SIZE = "export_size";
     private static final String KEY_PRIVACY_ACCEPTED = "privacy_accepted";
+    private static final String KEY_AI_MODE = "ai_mode";
     private static final String KEY_AI_GATEWAY_URL = "ai_gateway_url";
+    private static final String KEY_AI_DIRECT_PROVIDER = "ai_direct_provider";
+    private static final String KEY_AI_DIRECT_API_KEY = "ai_direct_api_key";
+    private static final String KEY_AI_DIRECT_MODEL = "ai_direct_model";
     private static final String EXPORT_FOLDER = "MyLight";
     private static final String SESSION_IMAGE_NAME = "last_session.jpg";
     private static final String AI_GATEWAY_PLACEHOLDER = "https://your-domain.com/mylight/ai-edit";
+    private static final int AI_MODE_LOCAL = 0;
+    private static final int AI_MODE_GATEWAY = 1;
+    private static final int AI_MODE_DIRECT = 2;
+    private static final String AI_PROVIDER_OPENAI = "openai";
+    private static final String AI_PROVIDER_GEMINI = "gemini";
+    private static final String DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
+    private static final String DEFAULT_GEMINI_MODEL = "gemini-1.5-flash";
     private static final String UPDATE_INFO_URL =
             "https://raw.githubusercontent.com/zhouhaoran-TJU/MyLight/main/dist/version.json";
     private static final String FEEDBACK_URL =
@@ -1122,18 +1133,58 @@ public final class MainActivity extends Activity {
         layout.setPadding(dp(18), dp(6), dp(18), 0);
 
         TextView intro = new TextView(this);
-        intro.setText("AI 只返回调色参数，图片仍在本地实时渲染。网关需由你自己的后端转发到大模型，避免在 App 内暴露 API Key。");
+        intro.setText("本地模式无需网络；网关模式适合正式分发；开发者直连会把 API Key 存在本机，仅建议自测。AI 只返回调色参数，图片仍在本地实时渲染。");
         intro.setTextColor(Color.rgb(206, 218, 234));
         intro.setTextSize(12f);
         intro.setPadding(0, 0, 0, dp(10));
         layout.addView(intro);
 
+        final int[] modeHolder = {preferences.getInt(KEY_AI_MODE, AI_MODE_LOCAL)};
+        final String[] providerHolder = {preferences.getString(KEY_AI_DIRECT_PROVIDER, AI_PROVIDER_OPENAI)};
+
+        LinearLayout modeRow = createButtonRow();
+        Button localModeButton = createButton("本地", modeHolder[0] == AI_MODE_LOCAL,
+                Color.rgb(77, 224, 163));
+        Button gatewayModeButton = createButton("网关", modeHolder[0] == AI_MODE_GATEWAY,
+                Color.rgb(89, 199, 255));
+        Button directModeButton = createButton("直连", modeHolder[0] == AI_MODE_DIRECT,
+                Color.rgb(255, 180, 92));
+        addAiChoiceButton(modeRow, localModeButton);
+        addAiChoiceButton(modeRow, gatewayModeButton);
+        addAiChoiceButton(modeRow, directModeButton);
+        layout.addView(modeRow);
+
         EditText urlInput = new EditText(this);
         urlInput.setSingleLine(true);
-        urlInput.setHint(AI_GATEWAY_PLACEHOLDER);
+        urlInput.setHint("网关地址：" + AI_GATEWAY_PLACEHOLDER);
         urlInput.setText(preferences.getString(KEY_AI_GATEWAY_URL, ""));
         urlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         layout.addView(urlInput, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+
+        LinearLayout providerRow = createButtonRow();
+        Button openAiButton = createButton("OpenAI", AI_PROVIDER_OPENAI.equals(providerHolder[0]),
+                Color.rgb(89, 199, 255));
+        Button geminiButton = createButton("Gemini", AI_PROVIDER_GEMINI.equals(providerHolder[0]),
+                Color.rgb(164, 128, 255));
+        addAiChoiceButton(providerRow, openAiButton);
+        addAiChoiceButton(providerRow, geminiButton);
+        layout.addView(providerRow);
+
+        EditText apiKeyInput = new EditText(this);
+        apiKeyInput.setSingleLine(true);
+        apiKeyInput.setHint("开发者直连 API Key");
+        apiKeyInput.setText(preferences.getString(KEY_AI_DIRECT_API_KEY, ""));
+        apiKeyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        layout.addView(apiKeyInput, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+
+        EditText modelInput = new EditText(this);
+        modelInput.setSingleLine(true);
+        modelInput.setHint("模型名，例如 " + DEFAULT_OPENAI_MODEL + " / " + DEFAULT_GEMINI_MODEL);
+        modelInput.setText(preferences.getString(KEY_AI_DIRECT_MODEL, DEFAULT_OPENAI_MODEL));
+        modelInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        layout.addView(modelInput, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
 
         EditText promptInput = new EditText(this);
@@ -1164,28 +1215,75 @@ public final class MainActivity extends Activity {
                 .setView(layout)
                 .setNegativeButton("关闭", null)
                 .create();
+        Runnable refreshChoices = () -> {
+            styleAiChoiceButton(localModeButton, "本地", modeHolder[0] == AI_MODE_LOCAL,
+                    Color.rgb(77, 224, 163));
+            styleAiChoiceButton(gatewayModeButton, "网关", modeHolder[0] == AI_MODE_GATEWAY,
+                    Color.rgb(89, 199, 255));
+            styleAiChoiceButton(directModeButton, "直连", modeHolder[0] == AI_MODE_DIRECT,
+                    Color.rgb(255, 180, 92));
+            styleAiChoiceButton(openAiButton, "OpenAI", AI_PROVIDER_OPENAI.equals(providerHolder[0]),
+                    Color.rgb(89, 199, 255));
+            styleAiChoiceButton(geminiButton, "Gemini", AI_PROVIDER_GEMINI.equals(providerHolder[0]),
+                    Color.rgb(164, 128, 255));
+        };
+        localModeButton.setOnClickListener(v -> {
+            modeHolder[0] = AI_MODE_LOCAL;
+            refreshChoices.run();
+        });
+        gatewayModeButton.setOnClickListener(v -> {
+            modeHolder[0] = AI_MODE_GATEWAY;
+            refreshChoices.run();
+        });
+        directModeButton.setOnClickListener(v -> {
+            modeHolder[0] = AI_MODE_DIRECT;
+            refreshChoices.run();
+        });
+        openAiButton.setOnClickListener(v -> {
+            providerHolder[0] = AI_PROVIDER_OPENAI;
+            if (modelInput.getText().toString().trim().isEmpty()
+                    || modelInput.getText().toString().contains("gemini")) {
+                modelInput.setText(DEFAULT_OPENAI_MODEL);
+            }
+            refreshChoices.run();
+        });
+        geminiButton.setOnClickListener(v -> {
+            providerHolder[0] = AI_PROVIDER_GEMINI;
+            if (modelInput.getText().toString().trim().isEmpty()
+                    || modelInput.getText().toString().startsWith("gpt")) {
+                modelInput.setText(DEFAULT_GEMINI_MODEL);
+            }
+            refreshChoices.run();
+        });
+        refreshChoices.run();
         View.OnClickListener listener = v -> {
             String gatewayUrl = urlInput.getText().toString().trim();
-            if (gatewayUrl.isEmpty()) {
-                Toast.makeText(this, "请先填写 AI 网关地址", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            preferences.edit().putString(KEY_AI_GATEWAY_URL, gatewayUrl).apply();
+            String apiKey = apiKeyInput.getText().toString().trim();
+            String model = modelInput.getText().toString().trim();
+            preferences.edit()
+                    .putInt(KEY_AI_MODE, modeHolder[0])
+                    .putString(KEY_AI_GATEWAY_URL, gatewayUrl)
+                    .putString(KEY_AI_DIRECT_PROVIDER, providerHolder[0])
+                    .putString(KEY_AI_DIRECT_API_KEY, apiKey)
+                    .putString(KEY_AI_DIRECT_MODEL, model)
+                    .apply();
             String prompt = promptInput.getText().toString().trim();
             if (v == autoButton) {
                 runAiRequest("auto_enhance", prompt.isEmpty() ? "自动优化这张照片，保持自然真实" : prompt,
-                        false);
+                        false, modeHolder[0], gatewayUrl, providerHolder[0], apiKey, model);
             } else if (v == editButton) {
                 if (prompt.isEmpty()) {
                     Toast.makeText(this, "请先输入想要的调整效果", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                runAiRequest("natural_edit", prompt, false);
+                runAiRequest("natural_edit", prompt, false, modeHolder[0], gatewayUrl,
+                        providerHolder[0], apiKey, model);
             } else {
                 if (prompt.isEmpty()) {
                     prompt = "生成一个适合当前照片的高级滤镜";
                 }
-                runAiRequest("generate_filter", prompt, true);
+                runAiRequest("generate_filter", prompt, true, modeHolder[0], gatewayUrl,
+                        providerHolder[0], apiKey, model);
             }
             dialog.dismiss();
         };
@@ -1195,16 +1293,45 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
-    private void runAiRequest(String action, String prompt, boolean saveAsFilter) {
+    private void addAiChoiceButton(LinearLayout row, Button button) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(38), 1f);
+        params.leftMargin = dp(3);
+        params.rightMargin = dp(3);
+        row.addView(button, params);
+    }
+
+    private void styleAiChoiceButton(Button button, String label, boolean selected, int accent) {
+        Button styled = createButton(label, selected, accent);
+        button.setText(label);
+        button.setTextColor(styled.getTextColors());
+        button.setBackground(styled.getBackground());
+        button.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
+        button.setAlpha(selected ? 1f : 0.78f);
+    }
+
+    private void runAiRequest(String action, String prompt, boolean saveAsFilter, int mode,
+            String gatewayUrl, String provider, String apiKey, String model) {
         if (originalBitmap == null || originalBitmap.isRecycled()) {
             Toast.makeText(this, "请先打开一张图片", Toast.LENGTH_SHORT).show();
             return;
         }
-        String gatewayUrl = preferences.getString(KEY_AI_GATEWAY_URL, "").trim();
-        if (gatewayUrl.isEmpty()) {
-            Toast.makeText(this, "请先配置 AI 网关地址", Toast.LENGTH_SHORT).show();
+        if (mode == AI_MODE_LOCAL) {
+            runLocalAiRequest(action, prompt, saveAsFilter);
             return;
         }
+        if (mode == AI_MODE_GATEWAY && gatewayUrl.isEmpty()) {
+            Toast.makeText(this, "请先填写 AI 网关地址，或切换到本地模式", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (mode == AI_MODE_DIRECT && apiKey.isEmpty()) {
+            Toast.makeText(this, "开发者直连需要填写 API Key", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String selectedModel = model == null ? "" : model.trim();
+        if (mode == AI_MODE_DIRECT && selectedModel.isEmpty()) {
+            selectedModel = AI_PROVIDER_GEMINI.equals(provider) ? DEFAULT_GEMINI_MODEL : DEFAULT_OPENAI_MODEL;
+        }
+        final String requestModel = selectedModel;
         ProgressDialog progressDialog = new ProgressDialog(this);
         progressDialog.setMessage(saveAsFilter ? "AI 正在生成滤镜" : "AI 正在分析图片");
         progressDialog.setIndeterminate(true);
@@ -1220,7 +1347,9 @@ public final class MainActivity extends Activity {
             try {
                 JSONObject payload = createAiPayload(action, prompt, aiSource,
                         geometrySnapshot, adjustmentsSnapshot, curvesSnapshot);
-                JSONObject response = new JSONObject(postJson(gatewayUrl, payload));
+                JSONObject response = mode == AI_MODE_DIRECT
+                        ? requestDirectAi(provider, apiKey, requestModel, payload)
+                        : new JSONObject(postJson(gatewayUrl, payload));
                 runOnUiThread(() -> {
                     progressDialog.dismiss();
                     applyAiResponse(response, action, prompt, saveAsFilter);
@@ -1254,6 +1383,202 @@ public final class MainActivity extends Activity {
         payload.put("image", imageToJson(source));
         payload.put("responseContract", aiResponseContract());
         return payload;
+    }
+
+    private void runLocalAiRequest(String action, String prompt, boolean saveAsFilter) {
+        Bitmap source = fastSourceBitmap != null && !fastSourceBitmap.isRecycled()
+                ? fastSourceBitmap : originalBitmap;
+        if (source == null || source.isRecycled()) {
+            Toast.makeText(this, "请先打开一张图片", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            JSONObject response = createLocalAiResponse(action, prompt, source);
+            applyAiResponse(response, action, prompt, saveAsFilter);
+        } catch (JSONException exception) {
+            Toast.makeText(this, "本地 AI 生成失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private JSONObject createLocalAiResponse(String action, String prompt, Bitmap source) throws JSONException {
+        JSONObject stats = imageStatsToJson(source);
+        float luminance = (float) stats.optDouble("averageLuminance", 0.5);
+        float saturation = (float) stats.optDouble("averageSaturation", 0.35);
+        float darkRatio = (float) stats.optDouble("darkRatio", 0.0);
+        float brightRatio = (float) stats.optDouble("brightRatio", 0.0);
+        String lowerPrompt = prompt == null ? "" : prompt.toLowerCase(Locale.US);
+        ColorAdjustments next = adjustments.copy();
+        CurveSet nextCurves = curves.copy();
+
+        next.exposure = clamp(next.exposure + (0.5f - luminance) * 0.75f, -1f, 1f);
+        next.highlights = clamp(next.highlights - Math.max(0f, brightRatio - 0.02f) * 2.8f
+                - Math.max(0f, luminance - 0.62f) * 0.42f, -1f, 1f);
+        next.shadows = clamp(next.shadows + Math.max(0f, darkRatio - 0.04f) * 2.2f
+                + Math.max(0f, 0.45f - luminance) * 0.42f, -1f, 1f);
+        next.contrast = clamp(next.contrast + 0.1f + Math.max(0f, 0.34f - saturation) * 0.14f, -1f, 1f);
+        next.saturation = clamp(next.saturation + (0.42f - saturation) * 0.28f, -1f, 1f);
+        next.ambiance = clamp(next.ambiance + 0.1f, -1f, 1f);
+        next.sharpness = clamp(next.sharpness + 0.08f, -1f, 1f);
+        next.noiseReduction = clamp(next.noiseReduction + Math.max(0f, darkRatio - 0.12f) * 0.45f, 0f, 1f);
+
+        if (containsAny(lowerPrompt, "人像", "肤色", "portrait", "skin")) {
+            next.exposure = clamp(next.exposure + 0.05f, -1f, 1f);
+            next.highlights = clamp(next.highlights - 0.08f, -1f, 1f);
+            next.shadows = clamp(next.shadows + 0.1f, -1f, 1f);
+            next.temperature = clamp(next.temperature + 0.04f, -1f, 1f);
+            next.tint = clamp(next.tint + 0.03f, -1f, 1f);
+            next.mixLuminance[ColorAdjustments.MIX_ORANGE] =
+                    clamp(next.mixLuminance[ColorAdjustments.MIX_ORANGE] + 0.06f, -1f, 1f);
+            next.mixSaturation[ColorAdjustments.MIX_ORANGE] =
+                    clamp(next.mixSaturation[ColorAdjustments.MIX_ORANGE] - 0.03f, -1f, 1f);
+        }
+        if (containsAny(lowerPrompt, "天空", "蓝天", "sky")) {
+            next.dehaze = clamp(next.dehaze + 0.08f, -1f, 1f);
+            next.mixSaturation[ColorAdjustments.MIX_BLUE] =
+                    clamp(next.mixSaturation[ColorAdjustments.MIX_BLUE] + 0.14f, -1f, 1f);
+            next.mixLuminance[ColorAdjustments.MIX_BLUE] =
+                    clamp(next.mixLuminance[ColorAdjustments.MIX_BLUE] - 0.06f, -1f, 1f);
+            next.mixHue[ColorAdjustments.MIX_BLUE] =
+                    clamp(next.mixHue[ColorAdjustments.MIX_BLUE] - 0.04f, -1f, 1f);
+        }
+        if (containsAny(lowerPrompt, "胶片", "电影", "复古", "film", "cinematic", "vintage")) {
+            next.fade = clamp(next.fade + 0.18f, 0f, 1f);
+            next.grain = clamp(next.grain + 0.08f, 0f, 1f);
+            next.temperature = clamp(next.temperature + 0.08f, -1f, 1f);
+            next.saturation = clamp(next.saturation - 0.08f, -1f, 1f);
+            next.vignette = clamp(next.vignette - 0.12f, -1f, 1f);
+            nextCurves.luminance.setFixedPoints(new int[] {18, 62, 128, 198, 248});
+        }
+        if (containsAny(lowerPrompt, "黑白", "单色", "mono", "black")) {
+            next.saturation = -0.95f;
+            next.contrast = clamp(next.contrast + 0.18f, -1f, 1f);
+            nextCurves.luminance.setFixedPoints(new int[] {6, 56, 128, 204, 255});
+        }
+        if (containsAny(lowerPrompt, "夜景", "暗光", "night")) {
+            next.exposure = clamp(next.exposure + 0.08f, -1f, 1f);
+            next.shadows = clamp(next.shadows + 0.18f, -1f, 1f);
+            next.highlights = clamp(next.highlights - 0.18f, -1f, 1f);
+            next.noiseReduction = clamp(next.noiseReduction + 0.2f, 0f, 1f);
+            next.dehaze = clamp(next.dehaze + 0.06f, -1f, 1f);
+        }
+        if (containsAny(lowerPrompt, "清透", "干净", "自然", "clean")) {
+            next.fade = clamp(next.fade + 0.04f, 0f, 1f);
+            next.vignette = clamp(next.vignette - 0.04f, -1f, 1f);
+            next.temperature = clamp(next.temperature + 0.02f, -1f, 1f);
+            next.saturation = clamp(next.saturation + 0.04f, -1f, 1f);
+        }
+
+        clampAdjustments(next);
+        String name = localAiName(action, prompt);
+        return new JSONObject()
+                .put("name", name)
+                .put("message", "已使用本地 AI 参数生成")
+                .put("adjustments", adjustmentsToJson(next))
+                .put("curves", curvesToJson(nextCurves));
+    }
+
+    private boolean containsAny(String text, String... keywords) {
+        for (String keyword : keywords) {
+            if (text.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String localAiName(String action, String prompt) {
+        if ("generate_filter".equals(action)) {
+            String clean = prompt == null ? "" : prompt.trim();
+            return clean.isEmpty() ? "本地 AI 滤镜" : "本地 AI " + clean;
+        }
+        return "本地 AI 调整";
+    }
+
+    private JSONObject requestDirectAi(String provider, String apiKey, String model,
+            JSONObject payload) throws IOException, JSONException {
+        JSONObject image = payload.getJSONObject("image");
+        String base64 = image.getString("base64");
+        JSONObject textPayload = new JSONObject(payload.toString());
+        textPayload.getJSONObject("image").remove("base64");
+        String prompt = "你是 MyLight 修图参数助手。根据图片和 JSON 上下文返回 MyLight 可用的调色参数。"
+                + "必须只输出一个 JSON 对象，不要 Markdown，不要解释。\n\n" + textPayload.toString();
+        if (AI_PROVIDER_GEMINI.equals(provider)) {
+            return requestGeminiDirect(apiKey, model, prompt, base64);
+        }
+        return requestOpenAiDirect(apiKey, model, prompt, base64);
+    }
+
+    private JSONObject requestOpenAiDirect(String apiKey, String model, String prompt,
+            String base64) throws IOException, JSONException {
+        JSONObject body = new JSONObject();
+        body.put("model", model == null || model.trim().isEmpty() ? DEFAULT_OPENAI_MODEL : model.trim());
+        body.put("max_output_tokens", 900);
+        JSONArray input = new JSONArray();
+        JSONObject message = new JSONObject();
+        message.put("role", "user");
+        JSONArray content = new JSONArray();
+        content.put(new JSONObject().put("type", "input_text").put("text", prompt));
+        content.put(new JSONObject().put("type", "input_image")
+                .put("image_url", "data:image/jpeg;base64," + base64));
+        message.put("content", content);
+        input.put(message);
+        body.put("input", input);
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Authorization", "Bearer " + apiKey);
+        JSONObject response = new JSONObject(postJson("https://api.openai.com/v1/responses", body, headers));
+        String text = response.optString("output_text", "");
+        if (text.isEmpty()) {
+            text = extractOpenAiOutputText(response);
+        }
+        return new JSONObject(extractJsonObjectText(text));
+    }
+
+    private String extractOpenAiOutputText(JSONObject response) throws JSONException {
+        JSONArray output = response.optJSONArray("output");
+        if (output == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < output.length(); i++) {
+            JSONArray content = output.getJSONObject(i).optJSONArray("content");
+            if (content == null) {
+                continue;
+            }
+            for (int j = 0; j < content.length(); j++) {
+                JSONObject item = content.getJSONObject(j);
+                String text = item.optString("text", "");
+                if (!text.isEmpty()) {
+                    builder.append(text);
+                }
+            }
+        }
+        return builder.toString();
+    }
+
+    private JSONObject requestGeminiDirect(String apiKey, String model, String prompt,
+            String base64) throws IOException, JSONException {
+        JSONObject body = new JSONObject();
+        JSONArray parts = new JSONArray();
+        parts.put(new JSONObject().put("text", prompt));
+        parts.put(new JSONObject().put("inline_data", new JSONObject()
+                .put("mime_type", "image/jpeg")
+                .put("data", base64)));
+        body.put("contents", new JSONArray().put(new JSONObject().put("parts", parts)));
+        body.put("generationConfig", new JSONObject()
+                .put("responseMimeType", "application/json")
+                .put("maxOutputTokens", 900));
+        String cleanModel = model == null || model.trim().isEmpty() ? DEFAULT_GEMINI_MODEL : model.trim();
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/"
+                + URLEncoder.encode(cleanModel, "UTF-8") + ":generateContent?key="
+                + URLEncoder.encode(apiKey, "UTF-8");
+        JSONObject response = new JSONObject(postJson(url, body));
+        JSONArray candidates = response.optJSONArray("candidates");
+        if (candidates == null || candidates.length() == 0) {
+            throw new IOException("Gemini returned no candidates");
+        }
+        JSONArray responseParts = candidates.getJSONObject(0).getJSONObject("content").getJSONArray("parts");
+        String text = responseParts.getJSONObject(0).optString("text", "");
+        return new JSONObject(extractJsonObjectText(text));
     }
 
     private JSONObject aiResponseContract() throws JSONException {
@@ -1332,6 +1657,11 @@ public final class MainActivity extends Activity {
     }
 
     private String postJson(String urlString, JSONObject payload) throws IOException {
+        return postJson(urlString, payload, null);
+    }
+
+    private String postJson(String urlString, JSONObject payload, Map<String, String> headers)
+            throws IOException {
         byte[] body = payload.toString().getBytes("UTF-8");
         HttpURLConnection connection = (HttpURLConnection) new URL(urlString).openConnection();
         connection.setConnectTimeout(12000);
@@ -1341,6 +1671,11 @@ public final class MainActivity extends Activity {
         connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         connection.setRequestProperty("Accept", "application/json");
         connection.setRequestProperty("X-MyLight-Client", "android");
+        if (headers != null) {
+            for (Map.Entry<String, String> entry : headers.entrySet()) {
+                connection.setRequestProperty(entry.getKey(), entry.getValue());
+            }
+        }
         try (OutputStream outputStream = connection.getOutputStream()) {
             outputStream.write(body);
         }
@@ -1363,6 +1698,26 @@ public final class MainActivity extends Activity {
         } finally {
             connection.disconnect();
         }
+    }
+
+    private String extractJsonObjectText(String text) throws IOException {
+        if (text == null) {
+            throw new IOException("Empty AI response");
+        }
+        String clean = text.trim();
+        if (clean.startsWith("```")) {
+            int firstLineEnd = clean.indexOf('\n');
+            int fenceEnd = clean.lastIndexOf("```");
+            if (firstLineEnd >= 0 && fenceEnd > firstLineEnd) {
+                clean = clean.substring(firstLineEnd + 1, fenceEnd).trim();
+            }
+        }
+        int start = clean.indexOf('{');
+        int end = clean.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            throw new IOException("AI did not return JSON");
+        }
+        return clean.substring(start, end + 1);
     }
 
     private void applyAiResponse(JSONObject response, String action, String prompt, boolean saveAsFilter) {

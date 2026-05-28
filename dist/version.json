@@ -1,6 +1,6 @@
 {
-  "versionCode": 6,
-  "versionName": "1.5-beta",
+  "versionCode": 7,
+  "versionName": "1.6-beta",
   "apkUrl": "https://github.com/zhouhaoran-TJU/MyLight/raw/main/dist/MyLight-beta.apk",
-  "notes": "新增 AI 修图助手：支持 AI 一键优化、自然语言调色和 AI 生成滤镜；AI 通过自定义后端网关返回参数，本地实时渲染。"
+  "notes": "AI 修图助手升级：支持本地智能模式、后端网关模式和开发者直连 OpenAI/Gemini 模式；不配置网关也可使用本地 AI 优化和生成滤镜。"
 }
