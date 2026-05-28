@@ -102,4 +102,20 @@ Gemini：
 - App 会请求：`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
 - 图片以 `inline_data` 形式传入
 
+MiMo：
+
+- Provider：`MiMo`
+- Model 示例：`mimo-v2.5`
+- App 会请求：`https://api.mimo-v2.com/v1/chat/completions`
+- 鉴权同时发送 `Authorization: Bearer {API Key}` 和 `api-key: {API Key}`
+- 图片以 OpenAI-compatible `image_url` data URL 形式传入
+
+MiMo 百炼：
+
+- Provider：`MiMo百炼`
+- Model 示例：`xiaomi/mimo-v2.5-pro`
+- App 会请求：`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`
+- 鉴权发送 `Authorization: Bearer {API Key}`
+- 图片以 OpenAI-compatible `image_url` data URL 形式传入
+
 直连模式只接受模型返回 JSON。若模型返回 Markdown、解释性文字或非 JSON 内容，客户端会尝试提取第一个 JSON 对象，失败时提示“AI 返回格式不正确”。

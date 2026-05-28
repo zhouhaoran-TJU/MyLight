@@ -1,6 +1,6 @@
 {
-  "versionCode": 7,
-  "versionName": "1.6-beta",
+  "versionCode": 8,
+  "versionName": "1.7-beta",
   "apkUrl": "https://github.com/zhouhaoran-TJU/MyLight/raw/main/dist/MyLight-beta.apk",
-  "notes": "AI 修图助手升级：支持本地智能模式、后端网关模式和开发者直连 OpenAI/Gemini 模式；不配置网关也可使用本地 AI 优化和生成滤镜。"
+  "notes": "AI 直连模式新增 MiMo 与 MiMo 百炼 Provider，可使用 OpenAI-compatible chat/completions 生成 MyLight 调色参数。"
 }

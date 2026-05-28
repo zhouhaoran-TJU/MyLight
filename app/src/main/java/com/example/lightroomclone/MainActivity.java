@@ -120,8 +120,12 @@ public final class MainActivity extends Activity {
     private static final int AI_MODE_DIRECT = 2;
     private static final String AI_PROVIDER_OPENAI = "openai";
     private static final String AI_PROVIDER_GEMINI = "gemini";
+    private static final String AI_PROVIDER_MIMO = "mimo";
+    private static final String AI_PROVIDER_MIMO_BAILIAN = "mimo_bailian";
     private static final String DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
     private static final String DEFAULT_GEMINI_MODEL = "gemini-1.5-flash";
+    private static final String DEFAULT_MIMO_MODEL = "mimo-v2.5";
+    private static final String DEFAULT_MIMO_BAILIAN_MODEL = "xiaomi/mimo-v2.5-pro";
     private static final String UPDATE_INFO_URL =
             "https://raw.githubusercontent.com/zhouhaoran-TJU/MyLight/main/dist/version.json";
     private static final String FEEDBACK_URL =
@@ -1178,9 +1182,17 @@ public final class MainActivity extends Activity {
                 Color.rgb(89, 199, 255));
         Button geminiButton = createButton("Gemini", AI_PROVIDER_GEMINI.equals(providerHolder[0]),
                 Color.rgb(164, 128, 255));
+        Button mimoButton = createButton("MiMo", AI_PROVIDER_MIMO.equals(providerHolder[0]),
+                Color.rgb(77, 224, 163));
+        Button mimoBailianButton = createButton("MiMo百炼",
+                AI_PROVIDER_MIMO_BAILIAN.equals(providerHolder[0]), Color.rgb(255, 180, 92));
         addAiChoiceButton(providerRow, openAiButton);
         addAiChoiceButton(providerRow, geminiButton);
         directConfig.addView(providerRow);
+        LinearLayout providerRow2 = createButtonRow();
+        addAiChoiceButton(providerRow2, mimoButton);
+        addAiChoiceButton(providerRow2, mimoBailianButton);
+        directConfig.addView(providerRow2);
 
         EditText apiKeyInput = new EditText(this);
         apiKeyInput.setSingleLine(true);
@@ -1192,8 +1204,8 @@ public final class MainActivity extends Activity {
 
         EditText modelInput = new EditText(this);
         modelInput.setSingleLine(true);
-        modelInput.setHint("模型名，例如 " + DEFAULT_OPENAI_MODEL + " / " + DEFAULT_GEMINI_MODEL);
-        modelInput.setText(preferences.getString(KEY_AI_DIRECT_MODEL, DEFAULT_OPENAI_MODEL));
+        modelInput.setHint("模型名，例如 " + DEFAULT_OPENAI_MODEL + " / " + DEFAULT_MIMO_MODEL);
+        modelInput.setText(preferences.getString(KEY_AI_DIRECT_MODEL, defaultModelForProvider(providerHolder[0])));
         modelInput.setInputType(InputType.TYPE_CLASS_TEXT);
         directConfig.addView(modelInput, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
@@ -1238,6 +1250,10 @@ public final class MainActivity extends Activity {
                     Color.rgb(89, 199, 255));
             styleAiChoiceButton(geminiButton, "Gemini", AI_PROVIDER_GEMINI.equals(providerHolder[0]),
                     Color.rgb(164, 128, 255));
+            styleAiChoiceButton(mimoButton, "MiMo", AI_PROVIDER_MIMO.equals(providerHolder[0]),
+                    Color.rgb(77, 224, 163));
+            styleAiChoiceButton(mimoBailianButton, "MiMo百炼",
+                    AI_PROVIDER_MIMO_BAILIAN.equals(providerHolder[0]), Color.rgb(255, 180, 92));
             gatewayConfig.setVisibility(modeHolder[0] == AI_MODE_GATEWAY ? View.VISIBLE : View.GONE);
             directConfig.setVisibility(modeHolder[0] == AI_MODE_DIRECT ? View.VISIBLE : View.GONE);
             if (modeHolder[0] == AI_MODE_GATEWAY) {
@@ -1262,18 +1278,22 @@ public final class MainActivity extends Activity {
         });
         openAiButton.setOnClickListener(v -> {
             providerHolder[0] = AI_PROVIDER_OPENAI;
-            if (modelInput.getText().toString().trim().isEmpty()
-                    || modelInput.getText().toString().contains("gemini")) {
-                modelInput.setText(DEFAULT_OPENAI_MODEL);
-            }
+            updateModelForProvider(modelInput, providerHolder[0]);
             refreshChoices.run();
         });
         geminiButton.setOnClickListener(v -> {
             providerHolder[0] = AI_PROVIDER_GEMINI;
-            if (modelInput.getText().toString().trim().isEmpty()
-                    || modelInput.getText().toString().startsWith("gpt")) {
-                modelInput.setText(DEFAULT_GEMINI_MODEL);
-            }
+            updateModelForProvider(modelInput, providerHolder[0]);
+            refreshChoices.run();
+        });
+        mimoButton.setOnClickListener(v -> {
+            providerHolder[0] = AI_PROVIDER_MIMO;
+            updateModelForProvider(modelInput, providerHolder[0]);
+            refreshChoices.run();
+        });
+        mimoBailianButton.setOnClickListener(v -> {
+            providerHolder[0] = AI_PROVIDER_MIMO_BAILIAN;
+            updateModelForProvider(modelInput, providerHolder[0]);
             refreshChoices.run();
         });
         refreshChoices.run();
@@ -1330,6 +1350,33 @@ public final class MainActivity extends Activity {
         button.setAlpha(selected ? 1f : 0.78f);
     }
 
+    private String defaultModelForProvider(String provider) {
+        if (AI_PROVIDER_GEMINI.equals(provider)) {
+            return DEFAULT_GEMINI_MODEL;
+        }
+        if (AI_PROVIDER_MIMO.equals(provider)) {
+            return DEFAULT_MIMO_MODEL;
+        }
+        if (AI_PROVIDER_MIMO_BAILIAN.equals(provider)) {
+            return DEFAULT_MIMO_BAILIAN_MODEL;
+        }
+        return DEFAULT_OPENAI_MODEL;
+    }
+
+    private void updateModelForProvider(EditText modelInput, String provider) {
+        String current = modelInput.getText().toString().trim();
+        if (current.isEmpty() || isKnownDefaultModel(current)) {
+            modelInput.setText(defaultModelForProvider(provider));
+        }
+    }
+
+    private boolean isKnownDefaultModel(String model) {
+        return DEFAULT_OPENAI_MODEL.equals(model)
+                || DEFAULT_GEMINI_MODEL.equals(model)
+                || DEFAULT_MIMO_MODEL.equals(model)
+                || DEFAULT_MIMO_BAILIAN_MODEL.equals(model);
+    }
+
     private void runAiRequest(String action, String prompt, boolean saveAsFilter, int mode,
             String gatewayUrl, String provider, String apiKey, String model) {
         if (originalBitmap == null || originalBitmap.isRecycled()) {
@@ -1350,7 +1397,7 @@ public final class MainActivity extends Activity {
         }
         String selectedModel = model == null ? "" : model.trim();
         if (mode == AI_MODE_DIRECT && selectedModel.isEmpty()) {
-            selectedModel = AI_PROVIDER_GEMINI.equals(provider) ? DEFAULT_GEMINI_MODEL : DEFAULT_OPENAI_MODEL;
+            selectedModel = defaultModelForProvider(provider);
         }
         final String requestModel = selectedModel;
         ProgressDialog progressDialog = new ProgressDialog(this);
@@ -1526,6 +1573,15 @@ public final class MainActivity extends Activity {
         if (AI_PROVIDER_GEMINI.equals(provider)) {
             return requestGeminiDirect(apiKey, model, prompt, base64);
         }
+        if (AI_PROVIDER_MIMO.equals(provider)) {
+            return requestChatCompletionsDirect("https://api.mimo-v2.com/v1/chat/completions",
+                    apiKey, model, DEFAULT_MIMO_MODEL, prompt, base64, true);
+        }
+        if (AI_PROVIDER_MIMO_BAILIAN.equals(provider)) {
+            return requestChatCompletionsDirect(
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                    apiKey, model, DEFAULT_MIMO_BAILIAN_MODEL, prompt, base64, false);
+        }
         return requestOpenAiDirect(apiKey, model, prompt, base64);
     }
 
@@ -1599,6 +1655,38 @@ public final class MainActivity extends Activity {
         }
         JSONArray responseParts = candidates.getJSONObject(0).getJSONObject("content").getJSONArray("parts");
         String text = responseParts.getJSONObject(0).optString("text", "");
+        return new JSONObject(extractJsonObjectText(text));
+    }
+
+    private JSONObject requestChatCompletionsDirect(String url, String apiKey, String model,
+            String defaultModel, String prompt, String base64, boolean includeApiKeyHeader)
+            throws IOException, JSONException {
+        JSONObject body = new JSONObject();
+        body.put("model", model == null || model.trim().isEmpty() ? defaultModel : model.trim());
+        body.put("temperature", 0.2);
+        body.put("max_tokens", 900);
+        JSONArray content = new JSONArray();
+        content.put(new JSONObject().put("type", "text").put("text", prompt));
+        content.put(new JSONObject().put("type", "image_url")
+                .put("image_url", new JSONObject()
+                        .put("url", "data:image/jpeg;base64," + base64)));
+        JSONObject message = new JSONObject()
+                .put("role", "user")
+                .put("content", content);
+        body.put("messages", new JSONArray().put(message));
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Authorization", "Bearer " + apiKey);
+        if (includeApiKeyHeader) {
+            headers.put("api-key", apiKey);
+        }
+        JSONObject response = new JSONObject(postJson(url, body, headers));
+        JSONArray choices = response.optJSONArray("choices");
+        if (choices == null || choices.length() == 0) {
+            throw new IOException("Model returned no choices");
+        }
+        JSONObject choice = choices.getJSONObject(0);
+        JSONObject responseMessage = choice.optJSONObject("message");
+        String text = responseMessage == null ? "" : responseMessage.optString("content", "");
         return new JSONObject(extractJsonObjectText(text));
     }
 
