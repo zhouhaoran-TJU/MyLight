@@ -1,6 +1,6 @@
 {
-  "versionCode": 9,
-  "versionName": "1.8-beta",
+  "versionCode": 10,
+  "versionName": "1.9-beta",
   "apkUrl": "https://github.com/zhouhaoran-TJU/MyLight/raw/main/dist/MyLight-beta.apk",
-  "notes": "AI 直连模式支持按 Provider 和模型分别保存 API Key，切换模型自动加载对应 API，并新增保存、选择、清除 API 操作。"
+  "notes": "优化全局按钮视觉：按钮增加圆角、渐变、描边、高光和按压状态，整体界面更精致统一。"
 }

@@ -26,6 +26,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
@@ -4466,27 +4467,87 @@ public final class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(text);
         button.setTextSize(12f);
-        button.setTextColor(selected ? Color.WHITE : blend(Color.rgb(218, 230, 243), accent, 0.24f));
+        button.setTextColor(createButtonTextColors(selected, accent));
         button.setAllCaps(false);
         button.setIncludeFontPadding(false);
         button.setMinHeight(0);
         button.setMinWidth(0);
-        button.setPadding(dp(8), 0, dp(8), 0);
-        GradientDrawable background = new GradientDrawable();
-        if (selected) {
-            background.setOrientation(GradientDrawable.Orientation.LEFT_RIGHT);
-            background.setColors(new int[] {blend(Color.rgb(12, 18, 28), accent, 0.55f),
-                    blend(Color.rgb(18, 29, 45), accent, 0.92f)});
-        } else {
-            background.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM);
-            background.setColors(new int[] {blend(Color.rgb(26, 34, 51), accent, 0.16f),
-                    blend(Color.rgb(12, 17, 27), accent, 0.08f)});
-        }
-        background.setStroke(dp(1), selected ? blend(Color.WHITE, accent, 0.42f)
-                : blend(Color.rgb(54, 70, 93), accent, 0.42f));
-        background.setCornerRadius(dp(8));
-        button.setBackground(background);
+        button.setPadding(dp(10), 0, dp(10), 0);
+        button.setBackground(createButtonBackground(selected, accent));
+        button.setElevation(selected ? dp(6) : dp(3));
+        button.setStateListAnimator(null);
         return button;
+    }
+
+    private ColorStateList createButtonTextColors(boolean selected, int accent) {
+        return new ColorStateList(
+                new int[][] {
+                        new int[] {-android.R.attr.state_enabled},
+                        new int[] {android.R.attr.state_pressed},
+                        new int[] {}
+                },
+                new int[] {
+                        Color.rgb(112, 126, 145),
+                        Color.WHITE,
+                        selected ? Color.WHITE : blend(Color.rgb(223, 234, 247), accent, 0.28f)
+                });
+    }
+
+    private StateListDrawable createButtonBackground(boolean selected, int accent) {
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[] {-android.R.attr.state_enabled},
+                createButtonBackgroundLayer(selected, accent, false, true));
+        states.addState(new int[] {android.R.attr.state_pressed},
+                createButtonBackgroundLayer(selected, accent, true, false));
+        states.addState(new int[] {}, createButtonBackgroundLayer(selected, accent, false, false));
+        return states;
+    }
+
+    private LayerDrawable createButtonBackgroundLayer(boolean selected, int accent,
+            boolean pressed, boolean disabled) {
+        int radius = dp(14);
+        int fillTop;
+        int fillBottom;
+        int strokeColor;
+        if (selected) {
+            fillTop = blend(Color.rgb(25, 36, 55), accent, pressed ? 0.58f : 0.74f);
+            fillBottom = blend(Color.rgb(9, 14, 24), accent, pressed ? 0.82f : 0.96f);
+            strokeColor = blend(Color.WHITE, accent, pressed ? 0.38f : 0.52f);
+        } else {
+            fillTop = blend(Color.rgb(35, 45, 66), accent, pressed ? 0.2f : 0.13f);
+            fillBottom = blend(Color.rgb(9, 14, 24), accent, pressed ? 0.18f : 0.08f);
+            strokeColor = blend(Color.rgb(64, 82, 108), accent, pressed ? 0.5f : 0.36f);
+        }
+        if (disabled) {
+            fillTop = Color.rgb(18, 24, 34);
+            fillBottom = Color.rgb(10, 14, 21);
+            strokeColor = Color.rgb(34, 44, 60);
+        }
+
+        GradientDrawable shadow = new GradientDrawable();
+        shadow.setColor(Color.argb(selected ? 112 : 82, 0, 0, 0));
+        shadow.setCornerRadius(radius);
+
+        GradientDrawable fill = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {fillTop, fillBottom});
+        fill.setCornerRadius(radius);
+
+        GradientDrawable shine = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {disabled ? Color.TRANSPARENT : Color.argb(selected ? 76 : 42, 255, 255, 255),
+                        Color.TRANSPARENT});
+        shine.setCornerRadius(radius);
+
+        GradientDrawable stroke = new GradientDrawable();
+        stroke.setColor(Color.TRANSPARENT);
+        stroke.setCornerRadius(radius);
+        stroke.setStroke(dp(selected ? 2 : 1), strokeColor);
+
+        LayerDrawable layers = new LayerDrawable(new Drawable[] {shadow, fill, shine, stroke});
+        layers.setLayerInset(0, dp(1), dp(3), dp(1), 0);
+        layers.setLayerInset(1, 0, 0, 0, dp(2));
+        layers.setLayerInset(2, dp(1), dp(1), dp(1), dp(2));
+        layers.setLayerInset(3, 0, 0, 0, dp(2));
+        return layers;
     }
 
     private int semanticAccent(String text) {
