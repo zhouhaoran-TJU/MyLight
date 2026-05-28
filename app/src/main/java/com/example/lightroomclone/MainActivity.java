@@ -62,6 +62,7 @@ import com.example.lightroomclone.core.GeometryAdjustments;
 import com.example.lightroomclone.core.ToneCurve;
 
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -106,8 +107,10 @@ public final class MainActivity extends Activity {
     private static final String KEY_EXPORT_QUALITY = "export_quality";
     private static final String KEY_EXPORT_SIZE = "export_size";
     private static final String KEY_PRIVACY_ACCEPTED = "privacy_accepted";
+    private static final String KEY_AI_GATEWAY_URL = "ai_gateway_url";
     private static final String EXPORT_FOLDER = "MyLight";
     private static final String SESSION_IMAGE_NAME = "last_session.jpg";
+    private static final String AI_GATEWAY_PLACEHOLDER = "https://your-domain.com/mylight/ai-edit";
     private static final String UPDATE_INFO_URL =
             "https://raw.githubusercontent.com/zhouhaoran-TJU/MyLight/main/dist/version.json";
     private static final String FEEDBACK_URL =
@@ -123,6 +126,7 @@ public final class MainActivity extends Activity {
     private static final int PANEL_EFFECTS = 6;
 
     private final ExecutorService renderExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService aiExecutor = Executors.newSingleThreadExecutor();
     private final AtomicInteger renderVersion = new AtomicInteger();
     private final AtomicInteger histogramVersion = new AtomicInteger();
     private final Handler renderHandler = new Handler(Looper.getMainLooper());
@@ -263,6 +267,7 @@ public final class MainActivity extends Activity {
             clearSavedSession();
         }
         renderExecutor.shutdownNow();
+        aiExecutor.shutdownNow();
         renderHandler.removeCallbacksAndMessages(null);
         recycleRenderSources();
         clearFilterThumbnailCache();
@@ -845,6 +850,10 @@ public final class MainActivity extends Activity {
         openButton.setOnClickListener(v -> openImage());
         addToolbarButton(actions, openButton);
 
+        Button aiButton = createButton("AI");
+        aiButton.setOnClickListener(v -> showAiAssistantDialog());
+        addToolbarIconButton(actions, aiButton);
+
         undoToolbarButton = createButton("↶");
         undoToolbarButton.setOnClickListener(v -> undoLastEdit());
         addToolbarIconButton(actions, undoToolbarButton);
@@ -886,6 +895,7 @@ public final class MainActivity extends Activity {
         layout.setPadding(dp(14), dp(8), dp(14), dp(10));
         scrollView.addView(layout);
         layout.addView(createActionSection("常用", new ActionItem[] {
+                new ActionItem("AI 助手", this::showAiAssistantDialog),
                 new ActionItem("历史记录", this::showHistoryDialog),
                 new ActionItem("一键优化", this::autoEnhance),
                 new ActionItem("导出设置", this::showExportSettingsDialog),
@@ -1104,6 +1114,352 @@ public final class MainActivity extends Activity {
         } catch (Exception exception) {
             Toast.makeText(this, "反馈提交失败", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void showAiAssistantDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(18), dp(6), dp(18), 0);
+
+        TextView intro = new TextView(this);
+        intro.setText("AI 只返回调色参数，图片仍在本地实时渲染。网关需由你自己的后端转发到大模型，避免在 App 内暴露 API Key。");
+        intro.setTextColor(Color.rgb(206, 218, 234));
+        intro.setTextSize(12f);
+        intro.setPadding(0, 0, 0, dp(10));
+        layout.addView(intro);
+
+        EditText urlInput = new EditText(this);
+        urlInput.setSingleLine(true);
+        urlInput.setHint(AI_GATEWAY_PLACEHOLDER);
+        urlInput.setText(preferences.getString(KEY_AI_GATEWAY_URL, ""));
+        urlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        layout.addView(urlInput, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
+
+        EditText promptInput = new EditText(this);
+        promptInput.setMinLines(3);
+        promptInput.setGravity(Gravity.TOP | Gravity.LEFT);
+        promptInput.setHint("例如：调成清透人像，压一点高光，肤色自然，背景更干净");
+        layout.addView(promptInput, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout actionRow = createButtonRow();
+        Button autoButton = createButton("AI 优化", true, Color.rgb(89, 199, 255));
+        Button editButton = createButton("按描述调整", false, Color.rgb(164, 128, 255));
+        Button filterButton = createButton("生成滤镜", false, Color.rgb(77, 224, 163));
+        LinearLayout.LayoutParams autoParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        autoParams.rightMargin = dp(4);
+        LinearLayout.LayoutParams editParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        editParams.leftMargin = dp(4);
+        editParams.rightMargin = dp(4);
+        LinearLayout.LayoutParams filterParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        filterParams.leftMargin = dp(4);
+        actionRow.addView(autoButton, autoParams);
+        actionRow.addView(editButton, editParams);
+        actionRow.addView(filterButton, filterParams);
+        layout.addView(actionRow);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("AI 修图助手")
+                .setView(layout)
+                .setNegativeButton("关闭", null)
+                .create();
+        View.OnClickListener listener = v -> {
+            String gatewayUrl = urlInput.getText().toString().trim();
+            if (gatewayUrl.isEmpty()) {
+                Toast.makeText(this, "请先填写 AI 网关地址", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            preferences.edit().putString(KEY_AI_GATEWAY_URL, gatewayUrl).apply();
+            String prompt = promptInput.getText().toString().trim();
+            if (v == autoButton) {
+                runAiRequest("auto_enhance", prompt.isEmpty() ? "自动优化这张照片，保持自然真实" : prompt,
+                        false);
+            } else if (v == editButton) {
+                if (prompt.isEmpty()) {
+                    Toast.makeText(this, "请先输入想要的调整效果", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                runAiRequest("natural_edit", prompt, false);
+            } else {
+                if (prompt.isEmpty()) {
+                    prompt = "生成一个适合当前照片的高级滤镜";
+                }
+                runAiRequest("generate_filter", prompt, true);
+            }
+            dialog.dismiss();
+        };
+        autoButton.setOnClickListener(listener);
+        editButton.setOnClickListener(listener);
+        filterButton.setOnClickListener(listener);
+        dialog.show();
+    }
+
+    private void runAiRequest(String action, String prompt, boolean saveAsFilter) {
+        if (originalBitmap == null || originalBitmap.isRecycled()) {
+            Toast.makeText(this, "请先打开一张图片", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String gatewayUrl = preferences.getString(KEY_AI_GATEWAY_URL, "").trim();
+        if (gatewayUrl.isEmpty()) {
+            Toast.makeText(this, "请先配置 AI 网关地址", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ProgressDialog progressDialog = new ProgressDialog(this);
+        progressDialog.setMessage(saveAsFilter ? "AI 正在生成滤镜" : "AI 正在分析图片");
+        progressDialog.setIndeterminate(true);
+        progressDialog.setCancelable(false);
+        progressDialog.show();
+        Bitmap sourceSnapshot = fastSourceBitmap != null && !fastSourceBitmap.isRecycled()
+                ? fastSourceBitmap : originalBitmap;
+        Bitmap aiSource = sourceSnapshot.copy(Bitmap.Config.ARGB_8888, false);
+        ColorAdjustments adjustmentsSnapshot = adjustments.copy();
+        CurveSet curvesSnapshot = curves.copy();
+        GeometryAdjustments geometrySnapshot = geometry.copy();
+        aiExecutor.execute(() -> {
+            try {
+                JSONObject payload = createAiPayload(action, prompt, aiSource,
+                        geometrySnapshot, adjustmentsSnapshot, curvesSnapshot);
+                JSONObject response = new JSONObject(postJson(gatewayUrl, payload));
+                runOnUiThread(() -> {
+                    progressDialog.dismiss();
+                    applyAiResponse(response, action, prompt, saveAsFilter);
+                });
+            } catch (Exception exception) {
+                runOnUiThread(() -> {
+                    progressDialog.dismiss();
+                    Toast.makeText(this, "AI 请求失败：" + readableError(exception),
+                            Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                if (!aiSource.isRecycled()) {
+                    aiSource.recycle();
+                }
+            }
+        });
+    }
+
+    private JSONObject createAiPayload(String action, String prompt, Bitmap source,
+            GeometryAdjustments geometrySnapshot, ColorAdjustments adjustmentsSnapshot,
+            CurveSet curvesSnapshot) throws JSONException, IOException {
+        JSONObject payload = new JSONObject();
+        payload.put("action", action);
+        payload.put("prompt", prompt);
+        payload.put("schemaVersion", 1);
+        payload.put("current", new JSONObject()
+                .put("geometry", geometryToJson(geometrySnapshot))
+                .put("adjustments", adjustmentsToJson(adjustmentsSnapshot))
+                .put("curves", curvesToJson(curvesSnapshot)));
+        payload.put("imageStats", imageStatsToJson(source));
+        payload.put("image", imageToJson(source));
+        payload.put("responseContract", aiResponseContract());
+        return payload;
+    }
+
+    private JSONObject aiResponseContract() throws JSONException {
+        return new JSONObject()
+                .put("description", "Return JSON only. Values must stay in MyLight slider ranges.")
+                .put("shape", new JSONObject()
+                        .put("name", "optional filter name")
+                        .put("message", "short Chinese explanation")
+                        .put("adjustments", new JSONObject()
+                                .put("exposure", "float -1..1")
+                                .put("brightness", "float -1..1")
+                                .put("highlights", "float -1..1")
+                                .put("shadows", "float -1..1")
+                                .put("contrast", "float -1..1")
+                                .put("saturation", "float -1..1")
+                                .put("temperature", "float -1..1")
+                                .put("tint", "float -1..1")
+                                .put("fade", "float 0..1")
+                                .put("vignette", "float -1..1")
+                                .put("dehaze", "float -1..1")
+                                .put("ambiance", "float -1..1")
+                                .put("sharpness", "float -1..1")
+                                .put("noiseReduction", "float 0..1")
+                                .put("grain", "float 0..1")
+                                .put("mixHue", "8 floats -1..1")
+                                .put("mixSaturation", "8 floats -1..1")
+                                .put("mixLuminance", "8 floats -1..1"))
+                        .put("curves", "array of 4 point arrays: luminance, red, green, blue"));
+    }
+
+    private JSONObject imageToJson(Bitmap source) throws IOException, JSONException {
+        Bitmap upload = scaleDown(source, 720);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        upload.compress(Bitmap.CompressFormat.JPEG, 82, output);
+        if (upload != source && !upload.isRecycled()) {
+            upload.recycle();
+        }
+        return new JSONObject()
+                .put("mime", "image/jpeg")
+                .put("width", source.getWidth())
+                .put("height", source.getHeight())
+                .put("base64", Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP));
+    }
+
+    private JSONObject imageStatsToJson(Bitmap source) throws JSONException {
+        long luminanceSum = 0L;
+        float saturationSum = 0f;
+        int dark = 0;
+        int bright = 0;
+        int samples = 0;
+        float[] hsv = new float[3];
+        int stepX = Math.max(1, source.getWidth() / 48);
+        int stepY = Math.max(1, source.getHeight() / 48);
+        for (int y = 0; y < source.getHeight(); y += stepY) {
+            for (int x = 0; x < source.getWidth(); x += stepX) {
+                int color = source.getPixel(x, y);
+                int luminance = Math.round(Color.red(color) * 0.299f + Color.green(color) * 0.587f
+                        + Color.blue(color) * 0.114f);
+                luminanceSum += luminance;
+                if (luminance < 28) {
+                    dark++;
+                } else if (luminance > 235) {
+                    bright++;
+                }
+                Color.colorToHSV(color, hsv);
+                saturationSum += hsv[1];
+                samples++;
+            }
+        }
+        float safeSamples = Math.max(1, samples);
+        return new JSONObject()
+                .put("averageLuminance", luminanceSum / (255f * safeSamples))
+                .put("averageSaturation", saturationSum / safeSamples)
+                .put("darkRatio", dark / safeSamples)
+                .put("brightRatio", bright / safeSamples);
+    }
+
+    private String postJson(String urlString, JSONObject payload) throws IOException {
+        byte[] body = payload.toString().getBytes("UTF-8");
+        HttpURLConnection connection = (HttpURLConnection) new URL(urlString).openConnection();
+        connection.setConnectTimeout(12000);
+        connection.setReadTimeout(45000);
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        connection.setRequestProperty("Accept", "application/json");
+        connection.setRequestProperty("X-MyLight-Client", "android");
+        try (OutputStream outputStream = connection.getOutputStream()) {
+            outputStream.write(body);
+        }
+        try {
+            int code = connection.getResponseCode();
+            InputStream inputStream = code >= 200 && code < 300
+                    ? connection.getInputStream() : connection.getErrorStream();
+            String text;
+            try {
+                text = inputStream == null ? "" : readText(inputStream);
+            } finally {
+                if (inputStream != null) {
+                    inputStream.close();
+                }
+            }
+            if (code < 200 || code >= 300) {
+                throw new IOException("HTTP " + code + (text.isEmpty() ? "" : ": " + text));
+            }
+            return text;
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private void applyAiResponse(JSONObject response, String action, String prompt, boolean saveAsFilter) {
+        try {
+            JSONObject payload = extractAiPayload(response);
+            ColorAdjustments nextAdjustments = adjustments.copy();
+            CurveSet nextCurves = curves.copy();
+            if (payload.has("adjustments")) {
+                readAdjustments(payload.getJSONObject("adjustments"), nextAdjustments);
+            }
+            if (payload.has("curves")) {
+                readCurves(payload.getJSONArray("curves"), nextCurves);
+            }
+            clampAdjustments(nextAdjustments);
+            if (saveAsFilter) {
+                String name = payload.optString("name",
+                        prompt == null || prompt.trim().isEmpty() ? "AI 滤镜" : "AI " + prompt.trim());
+                if (!saveCustomPreset(name, nextAdjustments, nextCurves)) {
+                    Toast.makeText(this, "AI 滤镜保存失败", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                pushUndoSnapshot("AI 生成滤镜");
+            } else {
+                pushUndoSnapshot("AI 调整");
+            }
+            copyAdjustments(nextAdjustments, adjustments);
+            curves = nextCurves;
+            clearActiveFilter();
+            activePanel = saveAsFilter ? PANEL_FILTER : activeAdjustPanel;
+            renderControls();
+            renderPreview(false);
+            String message = payload.optString("message", saveAsFilter ? "AI 滤镜已生成" : "AI 调整已应用");
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        } catch (JSONException exception) {
+            Toast.makeText(this, "AI 返回格式不正确", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private JSONObject extractAiPayload(JSONObject response) {
+        JSONObject current = response;
+        String[] wrappers = {"result", "edit", "preset", "data", "filter"};
+        for (String wrapper : wrappers) {
+            JSONObject nested = current.optJSONObject(wrapper);
+            if (nested != null) {
+                current = nested;
+            }
+        }
+        return current;
+    }
+
+    private void clampAdjustments(ColorAdjustments target) {
+        target.brightness = clamp(target.brightness, -1f, 1f);
+        target.contrast = clamp(target.contrast, -1f, 1f);
+        target.saturation = clamp(target.saturation, -1f, 1f);
+        target.temperature = clamp(target.temperature, -1f, 1f);
+        target.tint = clamp(target.tint, -1f, 1f);
+        target.exposure = clamp(target.exposure, -1f, 1f);
+        target.highlights = clamp(target.highlights, -1f, 1f);
+        target.shadows = clamp(target.shadows, -1f, 1f);
+        target.fade = clamp(target.fade, 0f, 1f);
+        target.vignette = clamp(target.vignette, -1f, 1f);
+        target.dehaze = clamp(target.dehaze, -1f, 1f);
+        target.ambiance = clamp(target.ambiance, -1f, 1f);
+        target.sharpness = clamp(target.sharpness, -1f, 1f);
+        target.noiseReduction = clamp(target.noiseReduction, 0f, 1f);
+        target.grain = clamp(target.grain, 0f, 1f);
+        target.localCount = Math.max(0, Math.min(ColorAdjustments.MAX_LOCAL_POINTS, target.localCount));
+        target.activeLocalIndex = Math.max(0, Math.min(Math.max(0, target.localCount - 1),
+                target.activeLocalIndex));
+        target.localX = clamp(target.localX, 0f, 1f);
+        target.localY = clamp(target.localY, 0f, 1f);
+        target.localRadius = clamp(target.localRadius, 0.12f, 0.8f);
+        target.localFeather = clamp(target.localFeather, 0f, 1f);
+        target.localExposure = clamp(target.localExposure, -1f, 1f);
+        target.localSaturation = clamp(target.localSaturation, -1f, 1f);
+        for (int i = 0; i < ColorAdjustments.MAX_LOCAL_POINTS; i++) {
+            target.localXs[i] = clamp(target.localXs[i], 0f, 1f);
+            target.localYs[i] = clamp(target.localYs[i], 0f, 1f);
+            target.localRadii[i] = clamp(target.localRadii[i], 0.12f, 0.8f);
+            target.localFeathers[i] = clamp(target.localFeathers[i], 0f, 1f);
+            target.localExposures[i] = clamp(target.localExposures[i], -1f, 1f);
+            target.localSaturations[i] = clamp(target.localSaturations[i], -1f, 1f);
+        }
+        for (int i = 0; i < ColorAdjustments.MIX_COUNT; i++) {
+            target.mixHue[i] = clamp(target.mixHue[i], -1f, 1f);
+            target.mixSaturation[i] = clamp(target.mixSaturation[i], -1f, 1f);
+            target.mixLuminance[i] = clamp(target.mixLuminance[i], -1f, 1f);
+        }
+        syncLegacyLocal(target);
+    }
+
+    private String readableError(Exception exception) {
+        String message = exception.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return exception.getClass().getSimpleName();
+        }
+        return message.length() > 80 ? message.substring(0, 80) : message;
     }
 
     private void rebuildPanelTabs() {
@@ -3046,19 +3402,27 @@ public final class MainActivity extends Activity {
         if (name.isEmpty()) {
             name = "MyLight " + (loadCustomPresets().size() + 1);
         }
+        if (saveCustomPreset(name, adjustments, curves)) {
+            renderControls();
+            Toast.makeText(this, "已保存滤镜", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "滤镜保存失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private boolean saveCustomPreset(String name, ColorAdjustments presetAdjustments, CurveSet presetCurves) {
         try {
             JSONArray presets = new JSONArray(preferences.getString(KEY_CUSTOM_PRESETS, "[]"));
             JSONObject preset = new JSONObject();
             preset.put("name", name);
-            preset.put("adjustments", adjustmentsToJson(adjustments));
-            preset.put("curves", curvesToJson(curves));
+            preset.put("adjustments", adjustmentsToJson(presetAdjustments));
+            preset.put("curves", curvesToJson(presetCurves));
             presets.put(preset);
             preferences.edit().putString(KEY_CUSTOM_PRESETS, presets.toString()).apply();
             clearFilterThumbnailCache();
-            renderControls();
-            Toast.makeText(this, "已保存滤镜", Toast.LENGTH_SHORT).show();
+            return true;
         } catch (JSONException exception) {
-            Toast.makeText(this, "滤镜保存失败", Toast.LENGTH_SHORT).show();
+            return false;
         }
     }
 
@@ -3227,15 +3591,19 @@ public final class MainActivity extends Activity {
     }
 
     private JSONObject geometryToJson() throws JSONException {
+        return geometryToJson(geometry);
+    }
+
+    private JSONObject geometryToJson(GeometryAdjustments source) throws JSONException {
         JSONObject object = new JSONObject();
-        object.put("cropMode", geometry.cropMode);
-        object.put("cropLeft", geometry.cropLeft);
-        object.put("cropTop", geometry.cropTop);
-        object.put("cropRight", geometry.cropRight);
-        object.put("cropBottom", geometry.cropBottom);
-        object.put("cropZoom", geometry.cropZoom);
-        object.put("rotateDegrees", geometry.rotateDegrees);
-        object.put("quarterTurns", geometry.quarterTurns);
+        object.put("cropMode", source.cropMode);
+        object.put("cropLeft", source.cropLeft);
+        object.put("cropTop", source.cropTop);
+        object.put("cropRight", source.cropRight);
+        object.put("cropBottom", source.cropBottom);
+        object.put("cropZoom", source.cropZoom);
+        object.put("rotateDegrees", source.rotateDegrees);
+        object.put("quarterTurns", source.quarterTurns);
         return object;
     }
 
